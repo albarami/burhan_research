@@ -151,6 +151,62 @@ def test_verify_detects_deleted_file(run_dir: Path) -> None:  # AT-M01-6
         Manifest.verify_seal(run_dir)
 
 
+def _reseal_manifest(run_dir: Path) -> dict[str, Any]:
+    manifest = Manifest.open(run_dir, FixedClock(), _open_fields())
+    manifest.seal("COMPLETED")
+    raw = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    return raw
+
+
+def _write_canonical_manifest(run_dir: Path, raw: dict[str, Any]) -> None:
+    from burhan.core.artifacts.canonical import dumps
+
+    (run_dir / "manifest.json").write_text(dumps(raw) + "\n", encoding="utf-8")
+
+
+def test_post_seal_manifest_field_edit_detected(run_dir: Path) -> None:  # REJECT fix 1
+    raw = _reseal_manifest(run_dir)
+    raw["study_id"] = "tampered-study"
+    _write_canonical_manifest(run_dir, raw)  # canonical form: semantic edit only
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(run_dir)
+
+
+def test_post_seal_sealed_at_edit_detected(run_dir: Path) -> None:  # REJECT fix 1
+    raw = _reseal_manifest(run_dir)
+    raw["seal"]["sealed_at"] = "2026-07-02T23:59:59Z"
+    _write_canonical_manifest(run_dir, raw)
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(run_dir)
+
+
+def test_post_seal_root_edit_detected(run_dir: Path) -> None:  # REJECT fix 1
+    raw = _reseal_manifest(run_dir)
+    raw["seal"]["hash_tree_root"] = "f" * 64
+    _write_canonical_manifest(run_dir, raw)
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(run_dir)
+
+
+def test_post_seal_stage_record_edit_detected(run_dir: Path) -> None:  # REJECT fix 1
+    manifest = Manifest.open(run_dir, FixedClock(), _open_fields())
+    manifest.record_stage(_stage_fields("ingest"))
+    manifest.seal("HALTED_INTEGRITY")
+    raw = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    raw["stages"][0]["state"] = "FAILED"
+    _write_canonical_manifest(run_dir, raw)
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(run_dir)
+
+
+def test_post_seal_formatting_only_edit_detected(run_dir: Path) -> None:  # REJECT fix 1
+    raw = _reseal_manifest(run_dir)
+    (run_dir / "manifest.json").write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(run_dir)
+
+
 def test_verify_unsealed_manifest_halts(run_dir: Path) -> None:
     Manifest.open(run_dir, FixedClock(), _open_fields())
     with pytest.raises(IntegrityHalt):

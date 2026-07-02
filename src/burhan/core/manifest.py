@@ -7,11 +7,15 @@ re-validated against the governed schema.
 
 ``seal`` computes the hash-tree root over the run directory: relative POSIX
 paths sorted bytewise, each leaf ``[path, sha256(file)]``, root = SHA-256
-over the canonical JSON of the leaf list. ``manifest.json`` itself is
-excluded (it carries the seal; self-reference is impossible). Symlinks do
-not belong in a run directory and halt. ``verify_seal`` recomputes the root,
-so any post-seal modification, addition, or deletion is detected
-(AT-M01-6); it never writes into the sealed directory (architecture §11).
+over the canonical JSON of the leaf list. The manifest participates through
+a **normalized leaf** — its own content with only the self-referential
+``seal.hash_tree_root`` field excluded — so post-seal edits to any manifest
+field, including ``seal.sealed_at``, change the recomputed root (REJECT
+fix 1); an edit to the stored root itself trivially mismatches the
+recomputation. ``verify_seal`` additionally requires the manifest file bytes
+to be the canonical serialization of their content, so formatting-only
+edits are detected too. Symlinks do not belong in a run directory and halt.
+``verify_seal`` never writes into the sealed directory (architecture §11).
 """
 
 from __future__ import annotations
@@ -43,9 +47,23 @@ TERMINAL_STATES = frozenset(
 _MANIFEST_OWNED_FIELDS = ("schema_version", "started", "state", "stages", "finished", "seal")
 
 
-def _hash_tree_root(run_dir: Path) -> str:
-    """Root hash over every file under ``run_dir`` except manifest.json."""
-    leaves: list[list[str]] = []
+def _normalized_manifest_hash(payload: dict[str, Any]) -> str:
+    """Hash of the manifest content with only ``seal.hash_tree_root`` removed."""
+    normalized = dict(payload)
+    seal = normalized.get("seal")
+    if isinstance(seal, dict):
+        normalized["seal"] = {key: value for key, value in seal.items() if key != "hash_tree_root"}
+    return sha256_canonical(normalized)
+
+
+def _hash_tree_root(run_dir: Path, manifest_payload: dict[str, Any]) -> str:
+    """Root hash over every run-dir file plus the normalized manifest leaf.
+
+    The physical ``manifest.json`` is skipped (it will contain the root);
+    the manifest's CONTENT enters the tree as the normalized leaf, so no
+    manifest field escapes the seal except the root itself.
+    """
+    leaves: list[list[str]] = [[MANIFEST_FILENAME, _normalized_manifest_hash(manifest_payload)]]
     for path in run_dir.rglob("*"):
         if path.is_symlink():
             halt(
@@ -120,11 +138,12 @@ class Manifest:
                     report={"state": state, "terminal": sorted(TERMINAL_STATES)},
                 )
             )
-        root = _hash_tree_root(self._run_dir)  # before the seal is written
         stamp = _stamp(self._clock, self._run_dir)
         payload = self._model.model_dump(mode="json", by_alias=True, exclude_unset=True)
         payload["state"] = state
         payload["finished"] = stamp
+        payload["seal"] = {"sealed_at": stamp}  # root joins after the tree is computed
+        root = _hash_tree_root(self._run_dir, payload)
         payload["seal"] = {"hash_tree_root": root, "sealed_at": stamp}
         self._model = _build(payload, self._run_dir)
         self._write()
@@ -138,7 +157,8 @@ class Manifest:
         """
         manifest_path = run_dir / MANIFEST_FILENAME
         try:
-            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw_text = manifest_path.read_text(encoding="utf-8")
+            raw = json.loads(raw_text)
         except OSError as exc:
             halt(
                 IntegrityHalt(
@@ -154,6 +174,14 @@ class Manifest:
                 )
             )
         model = validate_and_build(RunManifest, raw)
+        if raw_text != dump_canonical(model) + "\n":
+            halt(
+                IntegrityHalt(
+                    "manifest.json bytes are not the canonical serialization of "
+                    "its content (external mutation?)",
+                    report={"path": str(manifest_path)},
+                )
+            )
         if model.seal is None:
             halt(
                 IntegrityHalt(
@@ -161,7 +189,7 @@ class Manifest:
                     report={"path": str(manifest_path)},
                 )
             )
-        recomputed = _hash_tree_root(run_dir)
+        recomputed = _hash_tree_root(run_dir, raw)
         if recomputed != model.seal.hash_tree_root:
             halt(
                 IntegrityHalt(
