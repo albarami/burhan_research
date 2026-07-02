@@ -7,6 +7,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 | Contract | Commit | Date | Verdict | Note |
 |---|---|---|---|---|
 | — | — | — | — | ledger opens at M0 |
+| M0 | 39a7719 | 2026-07-02 | APPROVE | Repository scaffold and governed-document gate verified. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
