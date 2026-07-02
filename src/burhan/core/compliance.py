@@ -71,15 +71,7 @@ class Compliance:
                     )
                 )
             if status == "completed":
-                for prefix in step_outputs:
-                    if not any(True for _ in self._store.iter(prefix)):
-                        self._halt(
-                            IntegrityHalt(
-                                "step cannot be marked completed: required outputs "
-                                "prefix absent from the results store (FR-1106)",
-                                report={"step": step_id, "missing_prefix": prefix},
-                            )
-                        )
+                self._require_completed_outputs(step_id, step_outputs)
             row: dict[str, Any] = {
                 "step_id": step_id,
                 "status": status,
@@ -127,6 +119,22 @@ class Compliance:
         return "\n".join(lines)
 
     # -- internals ---------------------------------------------------------------
+
+    def _require_completed_outputs(self, step_id: str, step_outputs: list[str]) -> None:
+        """The FR-1106 gate: completed evidence needs the store outputs.
+
+        Shared by :meth:`mark` and :meth:`_replay` so a hand-written
+        ``completed`` row can never bypass the invariant.
+        """
+        for prefix in step_outputs:
+            if not any(True for _ in self._store.iter(prefix)):
+                self._halt(
+                    IntegrityHalt(
+                        "step cannot be marked completed: required outputs "
+                        "prefix absent from the results store (FR-1106)",
+                        report={"step": step_id, "missing_prefix": prefix},
+                    )
+                )
 
     def _halt(self, exc: IntegrityHalt) -> NoReturn:
         halt_with_file(exc, self._path.parent)
@@ -186,4 +194,8 @@ class Compliance:
                         report={"line": line_number, "step": step_id},
                     )
                 )
+            if str(raw["status"]) == "completed":
+                # Replay re-checks the FR-1106 gate: a hand-written completed
+                # row cannot bypass the store-outputs invariant (REJECT fix).
+                self._require_completed_outputs(step_id, self._playbook.outputs(step_id))
             self._rows[step_id] = raw

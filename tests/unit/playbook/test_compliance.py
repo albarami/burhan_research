@@ -193,6 +193,53 @@ def test_malformed_replayed_rows_halt(
         Compliance(playbook, store, path, FixedClock())
 
 
+def test_replayed_completed_rows_recheck_the_store_gate(
+    playbook: Playbook, store: ResultsStore, tmp_path: Path
+) -> None:  # REJECT fix: replay must not bypass FR-1106
+    path = tmp_path / "compliance.jsonl"
+    forged = {
+        "step_id": "PB-01",
+        "status": "completed",
+        "evidence": "forged",
+        "ts": "2026-07-02T09:00:00Z",
+    }
+    path.write_text(json.dumps(forged) + "\n", encoding="utf-8")
+    with pytest.raises(IntegrityHalt) as excinfo:  # store is empty
+        Compliance(playbook, store, path, FixedClock())
+    details = excinfo.value.to_report()["details"]
+    assert details["step"] == "PB-01"
+    assert details["missing_prefix"] == "power.close_fit"
+
+
+def test_forged_full_sequence_cannot_render_without_store_outputs(
+    playbook: Playbook, store: ResultsStore, tmp_path: Path
+) -> None:  # REJECT fix: a fully forged checklist is impossible
+    path = tmp_path / "compliance.jsonl"
+    rows = [
+        {
+            "step_id": step_id,
+            "status": "completed",
+            "evidence": "forged",
+            "ts": "2026-07-02T09:00:00Z",
+        }
+        for step_id in ALL_STEP_IDS
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    with pytest.raises(IntegrityHalt):  # halts at replay; render is unreachable
+        Compliance(playbook, store, path, FixedClock())
+
+
+def test_legitimate_reopen_with_store_backed_completed_rows_replays(
+    playbook: Playbook, store: ResultsStore, tmp_path: Path
+) -> None:  # the gate must not reject honest histories
+    path = tmp_path / "compliance.jsonl"
+    first = Compliance(playbook, store, path, FixedClock())
+    _feed_store(store, playbook.outputs("PB-01"), "PB-01")
+    first.mark("PB-01", "completed", "power computed")
+    reopened = Compliance(playbook, store, path, FixedClock())  # same run's store
+    reopened.mark("PB-02", "flagged", "still markable after reopen")
+
+
 def test_duplicate_replayed_rows_halt(
     playbook: Playbook, store: ResultsStore, tmp_path: Path
 ) -> None:
