@@ -33,6 +33,7 @@ from burhan.core.errors import IntegrityHalt, halt
 
 _AMBIGUOUS_MARKER = "AMBIGUOUS:"
 _REVERSE_TOKEN = "reverse"
+_NEGATED_REVERSE = re.compile(r"\bnot\s+reverse")
 
 
 def default_template_path() -> Path:
@@ -119,12 +120,17 @@ def _scan_reversed_sources(
     """Deterministic reverse-coding evidence: lines naming an item + 'reverse'.
 
     This is the single-source rule's evidence base (V7): the contract may
-    flag an item reverse-coded only if a source line says so.
+    flag an item reverse-coded only if a source line says so. A line stating
+    'not reverse…' is an explicit negative declaration — it is never positive
+    evidence (the dictionary cross-check owns negative-vs-contract conflicts).
     """
     reversed_items: set[str] = set()
     source_text = study_document + "\n" + (data_dictionary or "")
     for line in source_text.splitlines():
-        if _REVERSE_TOKEN not in line.lower():
+        lowered = line.lower()
+        if _REVERSE_TOKEN not in lowered:
+            continue
+        if _NEGATED_REVERSE.search(lowered):
             continue
         for code in item_codes:
             if re.search(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", line):

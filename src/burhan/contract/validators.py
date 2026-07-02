@@ -195,9 +195,13 @@ def v7_reverse_coding(config: StudyConfig, *, source_reversed: set[str]) -> None
 def cross_check_dictionary(config: StudyConfig, dictionary_text: str) -> None:
     """FR-204: the data dictionary is authoritative for what it declares.
 
-    Dictionary lines have the form ``CODE | attribute[, attribute]`` with
-    ``reverse-coded`` the recognized attribute. Any conflict with the
-    extracted contract is a hard failure citing the item and both sources.
+    Dictionary lines have the form ``CODE | attribute[, attribute]``.
+    Reverse-coding declarations carry explicit positive/negative semantics:
+    the exact attribute token ``reverse-coded`` declares reversal, the exact
+    token ``not reverse-coded`` declares its absence — substring matching
+    (which would read the negative as positive) is a defect. A real conflict
+    with the extracted contract in either direction is a hard failure citing
+    the item and both sources; a consistent declaration passes.
     """
     item_by_code = {item.code: item for item in config.instrument.items}
     conflicts: list[dict[str, str]] = []
@@ -205,16 +209,34 @@ def cross_check_dictionary(config: StudyConfig, dictionary_text: str) -> None:
         match = _DICT_LINE.match(line)
         if match is None:
             continue
-        code, attributes = match.group(1), match.group(2).lower()
+        code = match.group(1)
+        tokens = {token.strip() for token in match.group(2).lower().split(",")}
+        positive = "reverse-coded" in tokens
+        negative = "not reverse-coded" in tokens
         item = item_by_code.get(code)
         if item is None:
             conflicts.append({"item": code, "conflict": "dictionary item absent from contract"})
             continue
-        if "reverse-coded" in attributes and not item.reverse_coded:
+        if positive and negative:
+            conflicts.append(
+                {
+                    "item": code,
+                    "conflict": "dictionary declares both reverse-coded and not reverse-coded",
+                }
+            )
+        elif positive and not item.reverse_coded:
             conflicts.append(
                 {
                     "item": code,
                     "conflict": "dictionary declares reverse-coded; contract does not",
+                }
+            )
+        elif negative and item.reverse_coded:
+            conflicts.append(
+                {
+                    "item": code,
+                    "conflict": "dictionary declares not reverse-coded; "
+                    "contract declares reverse-coded",
                 }
             )
     if conflicts:

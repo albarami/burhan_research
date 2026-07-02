@@ -82,10 +82,25 @@ def load_llm_settings(path: Path) -> LlmSettings:
         )
     if not isinstance(raw, dict) or "nodes" not in raw or "providers" not in raw:
         halt(IntegrityHalt("llm.yaml lacks nodes/providers blocks", report={"path": str(path)}))
+    node_specs = raw["nodes"]
+    if not isinstance(node_specs, dict):
+        halt(
+            IntegrityHalt(
+                "llm.yaml nodes block must be a mapping of node specs",
+                report={"path": str(path), "found": type(node_specs).__name__},
+            )
+        )
     providers = raw["providers"]
+    if not isinstance(providers, dict):
+        halt(
+            IntegrityHalt(
+                "llm.yaml providers block must be a mapping of provider specs",
+                report={"path": str(path), "found": type(providers).__name__},
+            )
+        )
     nodes: dict[str, NodeSettings] = {}
     for name in _REQUIRED_NODES:
-        spec = raw["nodes"].get(name)
+        spec = node_specs.get(name)
         if not isinstance(spec, dict) or not {"provider", "model", "lineage"} <= spec.keys():
             halt(
                 IntegrityHalt(
@@ -93,18 +108,34 @@ def load_llm_settings(path: Path) -> LlmSettings:
                     report={"path": str(path), "node": name},
                 )
             )
-        temperature = float(spec.get("temperature", -1))
+        temperature = spec.get("temperature", -1)
+        if isinstance(temperature, bool) or not isinstance(temperature, int | float):
+            halt(
+                IntegrityHalt(
+                    "llm.yaml temperature must be a number (AD-04 deterministic settings)",
+                    report={"node": name, "found": repr(temperature)},
+                )
+            )
         if temperature != 0:
             halt(
                 IntegrityHalt(
                     "non-deterministic temperature configured; adapters run with "
                     "deterministic settings (AD-04)",
-                    report={"node": name, "temperature": temperature},
+                    report={"node": name, "temperature": float(temperature)},
+                )
+            )
+        max_retries = spec.get("max_retries", 2)
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int):
+            halt(
+                IntegrityHalt(
+                    "llm.yaml max_retries must be an integer",
+                    report={"node": name, "found": repr(max_retries)},
                 )
             )
         provider = str(spec["provider"])
         provider_spec = providers.get(provider)
-        if not isinstance(provider_spec, dict) or not provider_spec.get("api_key_env"):
+        api_key_env = provider_spec.get("api_key_env") if isinstance(provider_spec, dict) else None
+        if not isinstance(api_key_env, str) or not api_key_env:
             halt(
                 IntegrityHalt(
                     "llm.yaml provider has no resolvable api_key_env",
@@ -115,9 +146,9 @@ def load_llm_settings(path: Path) -> LlmSettings:
             provider=provider,
             model=str(spec["model"]),
             lineage=str(spec["lineage"]),
-            temperature=temperature,
-            api_key_env=str(provider_spec["api_key_env"]),
-            max_retries=int(spec.get("max_retries", 2)),
+            temperature=float(temperature),
+            api_key_env=api_key_env,
+            max_retries=max_retries,
         )
     if nodes["node_a"].lineage == nodes["node_c"].lineage:
         halt(

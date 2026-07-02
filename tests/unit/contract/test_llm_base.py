@@ -97,6 +97,39 @@ def test_nondeterministic_temperature_fails_startup(tmp_path: Path) -> None:  # 
     assert "temperature" in excinfo.value.message
 
 
+@pytest.mark.parametrize(
+    ("shape", "named"),
+    [
+        ({"nodes": ["node_a", "node_b"], "providers": {}}, "nodes"),  # list, not mapping
+        ({"nodes": {}, "providers": ["anthropic"]}, "providers"),  # list, not mapping
+    ],
+)
+def test_wrongly_typed_blocks_halt_typed(
+    tmp_path: Path, shape: dict[str, Any], named: str
+) -> None:  # REJECT-TC06 fix 1 (raw AttributeError probe)
+    with pytest.raises(IntegrityHalt) as excinfo:  # typed, never AttributeError
+        load_llm_settings(_settings_file(tmp_path, shape))
+    assert named in excinfo.value.message
+
+
+def test_non_numeric_temperature_halts_typed(tmp_path: Path) -> None:
+    # REJECT-TC06 fix 1 (raw ValueError probe: temperature: hot)
+    config = _config()
+    config["nodes"]["node_a"]["temperature"] = "hot"
+    with pytest.raises(IntegrityHalt) as excinfo:  # typed, never ValueError
+        load_llm_settings(_settings_file(tmp_path, config))
+    assert "temperature" in excinfo.value.message
+    assert "node_a" in str(excinfo.value.to_report()["details"])
+
+
+def test_non_integer_max_retries_halts_typed(tmp_path: Path) -> None:  # REJECT-TC06 fix 1
+    config = _config()
+    config["nodes"]["node_c"]["max_retries"] = "twice"
+    with pytest.raises(IntegrityHalt) as excinfo:
+        load_llm_settings(_settings_file(tmp_path, config))
+    assert "max_retries" in excinfo.value.message
+
+
 def test_malformed_settings_halt(tmp_path: Path) -> None:
     bad = tmp_path / "llm.yaml"
     bad.write_text("{unbalanced: [", encoding="utf-8")

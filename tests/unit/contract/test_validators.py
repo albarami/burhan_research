@@ -196,6 +196,31 @@ def test_dictionary_consistent_passes() -> None:
     cross_check_dictionary(config, "RS3 | reverse-coded\nCU3 | reverse-coded\n")
 
 
+def test_dictionary_negative_declaration_conflicts_with_positive_contract() -> None:
+    # REJECT-TC06 fix 2: RS3 | not reverse-coded vs contract True must FAIL.
+    config = example_config()  # RS3 is reverse_coded=True in the example
+    with pytest.raises(IntegrityHalt) as excinfo:
+        cross_check_dictionary(config, "RS3 | not reverse-coded\nCU3 | reverse-coded\n")
+    assert "FR-204" in excinfo.value.message
+    assert "RS3" in str(excinfo.value.to_report()["details"])
+
+
+def test_dictionary_self_contradiction_is_a_conflict() -> None:
+    # A line declaring both is unresolvable — hard failure, never a guess.
+    config = example_config()
+    with pytest.raises(IntegrityHalt) as excinfo:
+        cross_check_dictionary(config, "RS3 | reverse-coded, not reverse-coded\n")
+    assert "both" in str(excinfo.value.to_report()["details"])
+
+
+def test_dictionary_consistent_negative_declaration_passes() -> None:
+    # REJECT-TC06 fix 2: RS1 | not reverse-coded vs contract False must PASS.
+    config = example_config()  # RS1 is reverse_coded=False in the example
+    cross_check_dictionary(
+        config, "RS1 | not reverse-coded\nRS3 | reverse-coded\nCU3 | reverse-coded\n"
+    )
+
+
 def test_dictionary_non_matching_lines_are_ignored() -> None:
     config = example_config()
     text = "# comment header\n\nRS3 | reverse-coded\nCU3 | reverse-coded\nfree prose line\n"

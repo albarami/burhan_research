@@ -182,6 +182,19 @@ def test_dictionary_consistent_extraction_passes() -> None:
     assert config.meta.study_id == "example-adoption-2026"
 
 
+def test_consistent_negative_declaration_passes_end_to_end() -> None:
+    # REJECT-TC06 fix 2 corollary: an accepted negative declaration must not
+    # poison V7's evidence scan (a 'not reverse-coded' line is not positive
+    # evidence of reversal).
+    node = _node({"faithful": _faithful_yaml()})
+    config = node.extract(
+        study_document=_document("faithful"),
+        data_dictionary=("RS1 | not reverse-coded\nRS3 | reverse-coded\nCU3 | reverse-coded\n"),
+        min_designed_items=3,
+    )
+    assert config.meta.study_id == "example-adoption-2026"
+
+
 # -- FR-205: ambiguity is a hard stop --------------------------------------------------
 
 
