@@ -162,6 +162,22 @@ def test_verify_missing_manifest_halts(tmp_path: Path) -> None:
         Manifest.verify_seal(tmp_path)
 
 
+def test_verify_malformed_manifest_halts(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(IntegrityHalt):
+        Manifest.verify_seal(tmp_path)
+
+
+def test_non_utc_clock_is_refused(run_dir: Path) -> None:
+    class NaiveClock:
+        def now(self) -> dt.datetime:
+            return dt.datetime(2026, 7, 2, 9, 0, 0)  # noqa: DTZ001 — deliberate bad clock
+
+    with pytest.raises(IntegrityHalt):
+        Manifest.open(run_dir, NaiveClock(), _open_fields())
+    assert (run_dir / HALT_REPORT_FILENAME).exists()
+
+
 def test_double_seal_halts(run_dir: Path) -> None:
     manifest = Manifest.open(run_dir, FixedClock(), _open_fields())
     manifest.seal("COMPLETED")

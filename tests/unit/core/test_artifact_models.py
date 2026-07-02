@@ -59,6 +59,11 @@ def test_registry_covers_every_schema_with_a_model() -> None:
     assert sorted(MODEL_FOR_SCHEMA) == sorted(GOVERNED_SCHEMA_FILES)
 
 
+def test_unknown_schema_name_halts() -> None:
+    with pytest.raises(IntegrityHalt):
+        load_schema("not_a_governed_schema")
+
+
 @pytest.mark.parametrize("name", sorted(GOVERNED_SCHEMA_FILES))
 def test_valid_instance_round_trips_byte_identically(name: str) -> None:  # AT-M01-1
     instance = _valid(name)
