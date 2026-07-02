@@ -190,6 +190,27 @@ def test_non_utf8_csv_halts(tmp_path: Path) -> None:  # FR-101 integrity
     assert "unreadable" in excinfo.value.message
 
 
+@pytest.mark.parametrize("short_row_index", [1, 2])  # row 2 and row 3, 0-based
+def test_ragged_header_rows_halt_typed_with_precise_report(
+    tmp_path: Path, short_row_index: int
+) -> None:  # REJECT-TC05 fixes 1-2
+    lines = CSV.read_text(encoding="utf-8").splitlines()
+    fields = lines[short_row_index].split(",")
+    lines[short_row_index] = ",".join(fields[:-1])  # drop the last header cell
+    ragged = tmp_path / "ragged.csv"
+    ragged.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(IntegrityHalt) as excinfo:  # typed, never a raw ValueError
+        build_crosswalk(ragged, fixture_config())
+    details = excinfo.value.to_report()["details"]
+    assert details["file"] == "ragged.csv"
+    offending = details["ragged_header_rows"]
+    assert offending == [{"row": short_row_index + 1, "expected_width": 11, "actual_width": 10}]
+    # precise and value-free: no respondent cells in the report
+    flat = json.dumps(details)
+    for respondent_value in ("R_001", "R_002", "R_003"):
+        assert respondent_value not in flat
+
+
 def test_too_few_rows_for_declared_headers_halts(tmp_path: Path) -> None:
     stub = tmp_path / "tiny.csv"
     stub.write_text("a,b\n1,2\n", encoding="utf-8")

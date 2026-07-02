@@ -83,6 +83,19 @@ def build_crosswalk(export_path: Path, config: StudyConfig) -> Crosswalk:
                 },
             )
         )
+    expected_width = len(rows[0])
+    ragged = [
+        {"row": index + 1, "expected_width": expected_width, "actual_width": len(row)}
+        for index, row in enumerate(rows[:header_rows])
+        if len(row) != expected_width
+    ]
+    if ragged:
+        halt(
+            IntegrityHalt(
+                "ragged header block: header rows must all have the same width (FR-101/104)",
+                report={"file": export_path.name, "ragged_header_rows": ragged},
+            )
+        )
     codes = rows[0]
     texts = rows[1] if header_rows >= 2 else rows[0]
     data_rows = rows[header_rows:]
