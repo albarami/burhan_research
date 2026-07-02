@@ -132,3 +132,24 @@ def test_halt_report_colocated_on_boundary_stop(advisory: Advisory, run_dir: Pat
         advisory.emit(**_payload())
     report = json.loads((run_dir / HALT_REPORT_FILENAME).read_text(encoding="utf-8"))
     assert report["halt_class"] == "AdvisoryStop"
+
+
+@pytest.mark.parametrize("bad_now", ["naive", "subsecond"])
+def test_non_canonical_clock_halts_typed_not_valueerror(
+    run_dir: Path, bad_now: str
+) -> None:  # REJECT fix 2
+    import datetime as dt
+
+    from burhan.core.errors import HALT_REPORT_FILENAME
+
+    class BadClock:
+        def now(self) -> dt.datetime:
+            if bad_now == "naive":
+                return dt.datetime(2026, 7, 2, 9, 0, 0)  # noqa: DTZ001 — deliberate bad clock
+            return dt.datetime(2026, 7, 2, 9, 0, 0, 500000, tzinfo=dt.UTC)
+
+    provenance = Provenance(run_dir / "PROVENANCE.jsonl", FixedClock())
+    advisory = Advisory(run_dir, provenance, BadClock())
+    with pytest.raises(IntegrityHalt):  # typed taxonomy, never a raw ValueError
+        advisory.emit(**_payload())
+    assert (run_dir / HALT_REPORT_FILENAME).exists()

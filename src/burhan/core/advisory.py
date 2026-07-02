@@ -80,7 +80,16 @@ class Advisory:
                 ),
                 self._directory,
             )
-        stamp = format_utc_seconds(self._clock.now())
+        try:
+            stamp = format_utc_seconds(self._clock.now())
+        except ValueError as exc:  # typed taxonomy, never a raw ValueError
+            halt_with_file(
+                IntegrityHalt(
+                    "injected clock produced a non-canonical timestamp",
+                    report={"error": str(exc)},
+                ),
+                self._directory,
+            )
         self._directory.mkdir(parents=True, exist_ok=True)
         path.write_text(
             self._render(
