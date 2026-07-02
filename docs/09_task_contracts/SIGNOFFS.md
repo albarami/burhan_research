@@ -8,6 +8,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 |---|---|---|---|---|
 | — | — | — | — | ledger opens at M0 |
 | M0 | 39a7719 | 2026-07-02 | APPROVE | Repository scaffold and governed-document gate verified. |
+| TC-01 | 23e6efd | 2026-07-02 | APPROVE | Core foundation accepted; E2 doctor deferral applies until TC-04. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
