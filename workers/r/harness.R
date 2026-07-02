@@ -21,7 +21,7 @@ if (!isTRUE(renv_status$synchronized)) {
 envelope <- jsonlite::fromJSON(input_path, simplifyVector = FALSE)
 stopifnot(
   is.list(envelope),
-  is.character(envelope$call_id) || is.character(as.character(envelope$call_id)),
+  !is.null(envelope$call_id),
   !is.null(envelope$seed),
   !is.null(envelope$payload)
 )
