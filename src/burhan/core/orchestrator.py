@@ -30,6 +30,7 @@ from burhan.core.errors import (
     IntegrityHalt,
     VerificationHalt,
     get_halt_sink,
+    halt,
     write_halt_report,
 )
 from burhan.core.manifest import Manifest
@@ -208,9 +209,11 @@ class Orchestrator:
         """
         source_manifest = Manifest.verify_seal(source_run_dir)  # sealed + untampered
         if target_run_dir.exists():
-            raise IntegrityHalt(
-                "rerun target already exists; run directories are written once (AD-06)",
-                report={"target": str(target_run_dir)},
+            halt(  # sink-emitting path (standards §4); source stays untouched
+                IntegrityHalt(
+                    "rerun target already exists; run directories are written once (AD-06)",
+                    report={"target": str(target_run_dir)},
+                )
             )
         fields = source_manifest.model_dump(mode="json", by_alias=True, exclude_unset=True)
         # Manifest.open owns lifecycle + schema_version; everything else carries over.
@@ -228,10 +231,12 @@ class Orchestrator:
             if source_map[name] != target_map[name]
         )
         if missing or added or differing:
-            raise VerificationHalt(
-                "rerun identity assertion failed: regenerated artifacts are not "
-                "byte-identical (NFR-101)",
-                report={"missing": missing, "added": added, "differing": differing},
+            halt(  # sink-emitting path (standards §4); never writes into sealed dirs
+                VerificationHalt(
+                    "rerun identity assertion failed: regenerated artifacts are not "
+                    "byte-identical (NFR-101)",
+                    report={"missing": missing, "added": added, "differing": differing},
+                )
             )
         return result
 
@@ -242,9 +247,11 @@ class Orchestrator:
         missing = [name for name in PIPELINE if name not in registry]
         unknown = [name for name in registry if name not in PIPELINE]
         if missing or unknown:
-            raise IntegrityHalt(
-                "stage registry must cover the fixed DAG exactly (AD-01)",
-                report={"missing": missing, "unknown": unknown},
+            halt(  # sink-emitting path (standards §4); raised before any artifact exists
+                IntegrityHalt(
+                    "stage registry must cover the fixed DAG exactly (AD-01)",
+                    report={"missing": missing, "unknown": unknown},
+                )
             )
 
     def _terminate(
