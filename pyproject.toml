@@ -23,6 +23,10 @@ dependencies = [
   "openai>=1.30",
 ]
 
+[project.scripts]
+# TC-04 researcher-authorized minimal edit: expose the CLI (FR-1401).
+burhan = "burhan.cli:app"
+
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3.7"]
 
@@ -40,3 +44,12 @@ files = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[build-system]
+# uv's native backend: uv builds it in-process; no third-party backend package.
+requires = ["uv_build>=0.6,<1.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "burhan"
+module-root = "src"
