@@ -24,7 +24,7 @@ from conformance_util import (
     ANNOTATION_KEYWORDS,
     HANDLED_KEYWORDS,
     STRUCTURAL_KEYWORDS,
-    assertive_keywords_used,
+    assertive_keyword_occurrences,
     declared_defaults,
     generate_cases,
 )
@@ -48,6 +48,7 @@ def _augmented_study_config() -> dict[str, Any]:
     assert isinstance(base, dict)
     base["crosswalk"] = {"mode": "provided", "provided_map": {"Q4_1": "RS1"}}
     base["model"]["moderators"] = [{"variable": "sector", "on_path": "ENB->INT"}]
+    base["instrument"]["items"][0]["scale"]["labels"] = ["Strongly disagree", "Strongly agree"]
     return base
 
 
@@ -134,20 +135,34 @@ def test_format_sites_show_expected_h2_asymmetry(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", SCHEMA_NAMES)
-def test_keyword_coverage_is_closed(name: str) -> None:
+def test_keyword_occurrence_coverage_is_closed(name: str) -> None:  # REJECT fix 3
+    """Every (schema pointer, keyword) occurrence must receive ≥1 mutant.
+
+    Coverage is tracked per keyword OCCURRENCE (its location in the schema
+    document), not per keyword name — an optional branch left unreachable by
+    the base instance, or a new keyword, fails here instead of hiding.
+    """
     schema = load_schema(name)
-    used = assertive_keywords_used(schema)
-    unknown = used - HANDLED_KEYWORDS
+    occurrences = assertive_keyword_occurrences(schema)
+    assert occurrences, f"no assertive occurrences found in {name}?"
+    unknown = {keyword for _, keyword in occurrences} - HANDLED_KEYWORDS
     assert not unknown, (
         f"{name} uses assertive keywords the harness does not handle: {sorted(unknown)}"
     )
-    mutated = {
-        case.keyword for case in generate_cases(name, schema, _base(name)) if case.kind == "mutant"
+    generated = {
+        (case.schema_pointer, case.keyword)
+        for case in generate_cases(name, schema, _base(name))
+        if case.kind == "mutant"
     }
-    missing = used - mutated
+    missing = occurrences - generated
     assert not missing, (
-        f"{name}: keywords present in the schema but never mutation-tested "
-        f"(unreachable in the base instance?): {sorted(missing)}"
+        f"{name}: {len(missing)} keyword occurrences never mutation-tested "
+        f"(unreachable in the base instance?): {sorted(missing)[:15]}"
+    )
+    phantom = generated - occurrences
+    assert not phantom, (
+        f"{name}: walker produced mutants for pointers the schema does not "
+        f"declare (pointer-grammar drift): {sorted(phantom)[:15]}"
     )
 
 
