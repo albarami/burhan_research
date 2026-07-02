@@ -113,13 +113,23 @@ class Policy:
         self._sha256 = sha256_file(source)
 
     @classmethod
-    def load(cls, path: Path, *, mode: Mode = "production") -> Policy:
-        """Load and validate a decision policy (D1, D3).
+    def load(
+        cls, path: Path, *, mode: Mode = "production", playbook_path: Path | None = None
+    ) -> Policy:
+        """Load and validate a decision policy (D1, D2, D3).
+
+        AT-M02-2 requires playbook policy_refs to resolve AT LOAD: when
+        ``playbook_path`` is given (any mode) the D2 cross-check runs before
+        this returns, and production mode REQUIRES it — a production policy
+        cannot load without its refs resolved. ``registry.load_governance``
+        is the documented load path composing all governance cross-checks.
 
         Args:
             path: Policy YAML file.
-            mode: ``production`` requires ``meta.status: approved`` (D1);
-                ``certification`` may load drafts.
+            mode: ``production`` requires ``meta.status: approved`` (D1) and
+                a ``playbook_path`` (D2); ``certification`` may load drafts
+                and pieces in isolation.
+            playbook_path: Playbook whose policy_refs must resolve (D2).
         """
         data = load_governance_yaml(path, POLICY_SCHEMA_FILENAME)
         status = data["meta"]["status"]
@@ -138,7 +148,18 @@ class Policy:
                     report={"path": str(path)},
                 )
             )
-        return cls(data, source=path)
+        if mode == "production" and playbook_path is None:
+            halt(
+                IntegrityHalt(
+                    "D2: production-mode load requires the playbook so policy_refs "
+                    "resolve at load (AT-M02-2)",
+                    report={"path": str(path)},
+                )
+            )
+        policy = cls(data, source=path)
+        if playbook_path is not None:
+            policy.verify_playbook_refs(playbook_path)
+        return policy
 
     @property
     def version(self) -> str:

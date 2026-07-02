@@ -73,8 +73,16 @@ class Registry:
         }
 
     @classmethod
-    def load(cls, path: Path, *, mode: Mode = "production") -> Registry:
-        """Load and validate the registry (R1)."""
+    def load(
+        cls, path: Path, *, mode: Mode = "production", policy: Policy | None = None
+    ) -> Registry:
+        """Load and validate the registry (R1; R2/D3 at load when possible).
+
+        AT-M02-2 requires delegation_refs to resolve AT LOAD: when ``policy``
+        is given (any mode) the R2/D3 cross-checks run before this returns,
+        and production mode REQUIRES it. :func:`load_governance` is the
+        documented load path composing all governance cross-checks.
+        """
         data = load_governance_yaml(path, REGISTRY_SCHEMA_FILENAME)
         status = data["meta"]["status"]
         if mode == "production" and status != "approved":
@@ -95,7 +103,18 @@ class Registry:
                     )
                 )
             seen.add(decision_id)
-        return cls(data, source=path)
+        if mode == "production" and policy is None:
+            halt(
+                IntegrityHalt(
+                    "R2: production-mode load requires the decision policy so "
+                    "delegation_refs resolve at load (AT-M02-2)",
+                    report={"path": str(path)},
+                )
+            )
+        registry = cls(data, source=path)
+        if policy is not None:
+            registry.verify_delegations(policy)
+        return registry
 
     @property
     def status(self) -> str:
@@ -222,3 +241,31 @@ class Registry:
             policy_version=policy.version,
             granted_rules=granted,
         )
+
+
+@dataclass(frozen=True)
+class Governance:
+    """The cross-checked policy + registry pair produced by the load path."""
+
+    policy: Policy
+    registry: Registry
+
+
+def load_governance(
+    *,
+    policy_path: Path,
+    registry_path: Path,
+    playbook_path: Path,
+    mode: Mode = "production",
+) -> Governance:
+    """THE documented governance load path (AT-M02-2: refs resolve at load).
+
+    Loads the policy (D1/D3), resolves every playbook policy_ref against it
+    (D2), loads the registry (R1), and resolves every delegation_ref (R2 +
+    the D3 pointer rule) — all before returning. An unresolved reference
+    fails this load with the missing path named; no partially-checked
+    governance object ever escapes.
+    """
+    policy = Policy.load(policy_path, mode=mode, playbook_path=playbook_path)
+    registry = Registry.load(registry_path, mode=mode, policy=policy)
+    return Governance(policy=policy, registry=registry)

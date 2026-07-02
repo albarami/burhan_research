@@ -58,9 +58,26 @@ def test_template_validates_and_draft_blocks_production_load(tmp_path: Path) -> 
         Policy.load(POLICY_TEMPLATE, mode="production")  # D1
     assert "D1" in excinfo.value.message
     approved = policy_copy(tmp_path, status="approved")
-    loaded = Policy.load(approved, mode="production")
+    loaded = Policy.load(approved, mode="production", playbook_path=PLAYBOOK)
     assert loaded.status == "approved"
     assert loaded.version == "1.0"
+
+
+def test_production_policy_load_requires_playbook_for_d2(tmp_path: Path) -> None:  # REJECT fix 1
+    approved = policy_copy(tmp_path, status="approved")
+    with pytest.raises(IntegrityHalt) as excinfo:
+        Policy.load(approved, mode="production")  # D2 unenforceable without playbook
+    assert "D2" in excinfo.value.message
+
+
+def test_bad_playbook_ref_fails_policy_load(tmp_path: Path) -> None:  # REJECT fix 1 / AT-M02-2
+    def bogus(data: dict[str, Any]) -> None:
+        data["steps"][0]["criteria"][0]["policy_ref"] = "power.no_such.knob"
+
+    broken = playbook_copy(tmp_path, mutate=bogus)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        Policy.load(policy_copy(tmp_path), mode="certification", playbook_path=broken)
+    assert excinfo.value.to_report()["details"]["path"] == "power.no_such.knob"
 
 
 def test_every_leaf_path_is_addressable_via_rule(policy: Policy) -> None:  # AT-M02-1

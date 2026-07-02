@@ -21,7 +21,13 @@ from gov_util import (
 
 from burhan.core.errors import IntegrityHalt
 from burhan.core.policy import DecisionLog, Policy
-from burhan.core.registry import PermitToken, Recommendation, Registry
+from burhan.core.registry import (
+    Governance,
+    PermitToken,
+    Recommendation,
+    Registry,
+    load_governance,
+)
 
 ALL_PD_IDS = ["PD-01", "PD-02", "PD-03", "PD-04", "PD-05"]
 
@@ -200,13 +206,82 @@ def test_guard_unknown_decision_id_halts(
 # -- R1 / R2 / D3 load and cross-checks ---------------------------------------
 
 
-def test_template_registry_validates_and_draft_blocks_production(tmp_path: Path) -> None:
+def test_template_registry_validates_and_draft_blocks_production(
+    tmp_path: Path, policy_default: Policy
+) -> None:
     Registry.load(REGISTRY_TEMPLATE, mode="certification")  # draft OK here
     with pytest.raises(IntegrityHalt) as excinfo:
         Registry.load(REGISTRY_TEMPLATE, mode="production")  # R1
     assert "R1" in excinfo.value.message
     approved = registry_copy(tmp_path, status="approved")
-    assert Registry.load(approved, mode="production").status == "approved"
+    loaded = Registry.load(approved, mode="production", policy=policy_default)
+    assert loaded.status == "approved"
+
+
+# -- AT-M02-2: refs resolve AT LOAD (REJECT fix 1) ------------------------------
+
+
+def test_load_governance_is_the_load_path_and_cross_checks(tmp_path: Path) -> None:
+    from gov_util import PLAYBOOK
+
+    governance = load_governance(
+        policy_path=policy_copy(tmp_path),
+        registry_path=registry_copy(tmp_path),
+        playbook_path=PLAYBOOK,
+        mode="certification",
+    )
+    assert isinstance(governance, Governance)
+    assert governance.policy.version == "1.0"
+    assert governance.registry.entry("PD-05")["delegable"] is True
+
+
+def test_bad_delegation_ref_fails_at_load(tmp_path: Path, policy_default: Policy) -> None:
+    # AT-M02-2: the unresolvable ref must fail the LOAD path itself.
+    def bogus(data: dict[str, Any]) -> None:
+        data["protected_decisions"][4]["delegation_ref"] = "measurement.no_such.rule"
+
+    broken = registry_copy(tmp_path, mutate=bogus)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        Registry.load(broken, mode="certification", policy=policy_default)
+    assert excinfo.value.to_report()["details"]["path"] == "measurement.no_such.rule"
+
+
+def test_bad_delegation_ref_fails_load_governance(tmp_path: Path) -> None:
+    from gov_util import PLAYBOOK
+
+    def bogus(data: dict[str, Any]) -> None:
+        data["protected_decisions"][4]["delegation_ref"] = "measurement.no_such.rule"
+
+    with pytest.raises(IntegrityHalt):
+        load_governance(
+            policy_path=policy_copy(tmp_path),
+            registry_path=registry_copy(tmp_path, mutate=bogus),
+            playbook_path=PLAYBOOK,
+            mode="certification",
+        )
+
+
+def test_bad_playbook_ref_fails_load_governance(tmp_path: Path) -> None:
+    from gov_util import playbook_copy
+
+    def bogus(data: dict[str, Any]) -> None:
+        data["steps"][0]["criteria"][0]["policy_ref"] = "power.no_such.knob"
+
+    with pytest.raises(IntegrityHalt) as excinfo:
+        load_governance(
+            policy_path=policy_copy(tmp_path),
+            registry_path=registry_copy(tmp_path),
+            playbook_path=playbook_copy(tmp_path, mutate=bogus),
+            mode="certification",
+        )
+    assert excinfo.value.to_report()["details"]["path"] == "power.no_such.knob"
+
+
+def test_production_registry_load_requires_policy_for_r2(tmp_path: Path) -> None:
+    approved = registry_copy(tmp_path, status="approved")
+    with pytest.raises(IntegrityHalt) as excinfo:
+        Registry.load(approved, mode="production")  # R2 unenforceable without policy
+    assert "R2" in excinfo.value.message
 
 
 def test_duplicate_pd_ids_halt(tmp_path: Path) -> None:  # R1
