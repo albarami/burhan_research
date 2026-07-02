@@ -262,6 +262,15 @@ def test_non_utc_clock_is_refused(tmp_path: Path) -> None:
         store.write(_entry())
 
 
+def test_non_serializable_params_halt_typed_with_report(
+    store: ResultsStore, tmp_path: Path
+) -> None:  # REJECT fix 2
+    with pytest.raises(IntegrityHalt):
+        store.write(_entry(params={"bad": object()}))
+    assert (tmp_path / "results" / HALT_REPORT_FILENAME).exists()
+    assert not (tmp_path / "results" / "results.jsonl").exists()  # nothing was ever written
+
+
 def test_write_accepts_mapping_and_returns_typed_entry(store: ResultsStore) -> None:
     fields: Mapping[str, Any] = _entry(
         "effects.indirect.READINESS->INT.boot_ci",

@@ -160,6 +160,21 @@ def test_dump_validates_write_side() -> None:
         dump_canonical(entry)
 
 
+def test_non_json_payload_halts_at_load_with_path() -> None:  # REJECT fix 2
+    decision = valid_instance("decision_entry")
+    decision["inputs"] = {"bad": object()}
+    with pytest.raises(IntegrityHalt) as excinfo:
+        validate_and_build(MODEL_FOR_SCHEMA["decision_entry"], decision)
+    assert "$.inputs.bad" in str(excinfo.value.to_report()["details"].get("path", ""))
+
+
+def test_dump_canonical_wraps_serialization_failures() -> None:  # REJECT fix 2
+    entry = validate_and_build(MODEL_FOR_SCHEMA["provenance_entry"], _valid("provenance_entry"))
+    object.__setattr__(entry, "details", {"bad": object()})
+    with pytest.raises(IntegrityHalt):  # never a bare PydanticSerializationError
+        dump_canonical(entry)
+
+
 def test_defaults_match_schema_defaults() -> None:  # Fix 4b default-agreement seed
     decision = valid_instance("decision_entry")
     del decision["protected"]

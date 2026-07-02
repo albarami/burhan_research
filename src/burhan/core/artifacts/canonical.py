@@ -20,6 +20,16 @@ from burhan.core.errors import IntegrityHalt, halt
 _FILE_CHUNK_BYTES = 1 << 20
 
 
+class _NonCanonical(Exception):
+    """Internal: a payload leaf falls outside the closed canonical domain."""
+
+    def __init__(self, message: str, path: str, detail: str) -> None:
+        super().__init__(message)
+        self.message = message
+        self.path = path
+        self.detail = detail
+
+
 def _normalize(value: object, path: str) -> object:
     """Validate ``value`` against the closed domain; normalize floats."""
     if value is None or isinstance(value, str):
@@ -30,39 +40,51 @@ def _normalize(value: object, path: str) -> object:
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
-            halt(
-                IntegrityHalt(
-                    "non-finite float in canonical payload",
-                    report={"path": path, "value": repr(value)},
-                )
-            )
+            raise _NonCanonical("non-finite float in canonical payload", path, repr(value))
         return 0.0 if value == 0.0 else value
     if isinstance(value, dict):
         normalized: dict[str, object] = {}
         for key, item in value.items():
             if not isinstance(key, str):
-                halt(
-                    IntegrityHalt(
-                        "non-string dict key in canonical payload",
-                        report={"path": path, "key": repr(key)},
-                    )
-                )
+                raise _NonCanonical("non-string dict key in canonical payload", path, repr(key))
             normalized[key] = _normalize(item, f"{path}.{key}")
         return normalized
     if isinstance(value, list):
         return [_normalize(item, f"{path}[{index}]") for index, item in enumerate(value)]
-    halt(
-        IntegrityHalt(
-            "unsupported type in canonical payload",
-            report={"path": path, "type": type(value).__name__},
+    raise _NonCanonical("unsupported type in canonical payload", path, type(value).__name__)
+
+
+def check_payload(obj: object) -> None:
+    """Halt (typed) unless ``obj`` lies entirely inside the canonical domain.
+
+    Used as the loader's front door so non-JSON content in freeform fields
+    (e.g. ``params``/``details``/``inputs``) raises :class:`IntegrityHalt`
+    with the offending path, never an untyped serialization error.
+    """
+    try:
+        _normalize(obj, "$")
+    except _NonCanonical as exc:
+        halt(
+            IntegrityHalt(
+                exc.message,
+                report={"path": exc.path, "detail": exc.detail},
+            )
         )
-    )
 
 
 def dumps(obj: object) -> str:
     """Serialize ``obj`` to the canonical JSON string."""
+    try:
+        normalized = _normalize(obj, "$")
+    except _NonCanonical as exc:
+        halt(
+            IntegrityHalt(
+                exc.message,
+                report={"path": exc.path, "detail": exc.detail},
+            )
+        )
     return json.dumps(
-        _normalize(obj, "$"),
+        normalized,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

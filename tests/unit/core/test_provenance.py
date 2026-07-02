@@ -137,6 +137,16 @@ def test_reopen_rejects_malformed_line(log_path: Path) -> None:
         Provenance(log_path, FixedClock())
 
 
+def test_non_serializable_details_halt_typed_with_report(log_path: Path) -> None:  # REJECT fix 2
+    log = Provenance(log_path, FixedClock())
+    log.append(_fields())
+    with pytest.raises(IntegrityHalt):
+        log.append(_fields(details={"bad": object()}))
+    assert (log_path.parent / HALT_REPORT_FILENAME).exists()
+    assert len(log_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert log.append(_fields()).seq == 2  # failed attempt consumed no seq
+
+
 def test_no_mutating_api_exists(log_path: Path) -> None:
     log = Provenance(log_path, FixedClock())
     public = {

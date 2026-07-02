@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
+from pydantic_core import PydanticSerializationError
 
 from burhan.core.artifacts import canonical
 from burhan.core.artifacts.models import (
@@ -63,6 +64,10 @@ def validate_and_build[M: ArtifactModel](model_cls: type[M], instance: object) -
             on model/schema divergence (schema accepted, model rejected).
     """
     name = _schema_name(model_cls)
+    # Front door: the governed schemas cannot constrain freeform subtrees
+    # (additionalProperties: true), so non-JSON content there must be caught
+    # here, typed, with its path (REJECT fix 2).
+    canonical.check_payload(instance)
     check_instance(name, instance)
     try:
         return model_cls.model_validate(instance)
@@ -87,8 +92,21 @@ def validate_and_build[M: ArtifactModel](model_cls: type[M], instance: object) -
 
 
 def dump_canonical(model: ArtifactModel) -> str:
-    """Serialize a model to canonical JSON, re-validating on the way out."""
-    payload = model.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    """Serialize a model to canonical JSON, re-validating on the way out.
+
+    Serialization failures (e.g. non-JSON content smuggled into a freeform
+    field after construction) surface as :class:`IntegrityHalt`, never as an
+    untyped pydantic error (REJECT fix 2).
+    """
+    try:
+        payload = model.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    except PydanticSerializationError as exc:
+        halt(
+            IntegrityHalt(
+                "artifact model produced non-serializable content",
+                report={"model": type(model).__name__, "error": str(exc)},
+            )
+        )
     check_instance(_schema_name(type(model)), payload)
     return canonical.dumps(payload)
 
