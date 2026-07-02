@@ -236,9 +236,7 @@ def resolve_provider_call(settings: LlmSettings, node: str) -> Callable[[str], s
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return "".join(
-                block.text for block in response.content if isinstance(block, TextBlock)
-            )
+            return "".join(block.text for block in response.content if isinstance(block, TextBlock))
 
         return call_anthropic
     if node_settings.provider == "openai":
