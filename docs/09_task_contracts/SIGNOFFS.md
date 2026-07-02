@@ -13,6 +13,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 | TC-03 | d23a32f | 2026-07-02 | APPROVE | Playbook engine accepted; compliance replay cannot bypass the FR-1106 store gate. |
 | TC-04 | 8a99436 | 2026-07-02 | APPROVE | Orchestrator/CLI/R harness accepted; real R, lintr, zero-skip suite, and doctor green. |
 | TC-05 | be136ee | 2026-07-02 | APPROVE | Ingest crosswalk accepted; ragged headers halt typed and all gates green. |
+| TC-06 | 5b9e48a | 2026-07-02 | APPROVE | Node A contract accepted; typed llm.yaml validation, dictionary polarity, and all gates green. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
