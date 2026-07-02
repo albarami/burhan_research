@@ -124,11 +124,12 @@ def halt(exc: BurhanHalt) -> NoReturn:
     raise exc
 
 
-def halt_with_file(exc: BurhanHalt, directory: Path) -> NoReturn:
-    """Write ``halt_report.json`` into ``directory``, then :func:`halt`.
+def write_halt_report(exc: BurhanHalt, directory: Path) -> Path:
+    """Write ``halt_report.json`` (canonical JSON) into ``directory``.
 
-    For components that own a live (unsealed) working directory; never used
-    against sealed run directories, which are immutable (architecture §11).
+    Does not emit to the sink and does not raise — used by components that
+    catch an already-emitted halt and must co-locate its file-form report
+    before re-raising.
     """
     # Deferred import: canonical imports this module at module level.
     from burhan.core.artifacts.canonical import dumps
@@ -136,4 +137,14 @@ def halt_with_file(exc: BurhanHalt, directory: Path) -> NoReturn:
     directory.mkdir(parents=True, exist_ok=True)
     report_path = directory / HALT_REPORT_FILENAME
     report_path.write_text(dumps(exc.to_report()) + "\n", encoding="utf-8")
+    return report_path
+
+
+def halt_with_file(exc: BurhanHalt, directory: Path) -> NoReturn:
+    """Write ``halt_report.json`` into ``directory``, then :func:`halt`.
+
+    For components that own a live (unsealed) working directory; never used
+    against sealed run directories, which are immutable (architecture §11).
+    """
+    write_halt_report(exc, directory)
     halt(exc)

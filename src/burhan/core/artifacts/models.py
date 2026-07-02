@@ -59,6 +59,15 @@ UtcSeconds = Annotated[
 ]
 
 
+def format_utc_seconds(value: dt.datetime) -> str:
+    """Validate (UTC-aware, whole-second) and format a canonical timestamp.
+
+    Raises:
+        ValueError: if the datetime is naive, non-UTC, or sub-second.
+    """
+    return _serialize_utc_seconds(_validate_utc_seconds(value))
+
+
 class ArtifactModel(BaseModel):
     """Base for every artifact crossing a stage boundary (standards §1)."""
 
