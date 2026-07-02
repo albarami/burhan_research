@@ -12,6 +12,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 | TC-02 | 1744ec6 | 2026-07-02 | APPROVE | Governance accepted; protected boundary enforced at load, cross-check, and guard. |
 | TC-03 | d23a32f | 2026-07-02 | APPROVE | Playbook engine accepted; compliance replay cannot bypass the FR-1106 store gate. |
 | TC-04 | 8a99436 | 2026-07-02 | APPROVE | Orchestrator/CLI/R harness accepted; real R, lintr, zero-skip suite, and doctor green. |
+| TC-05 | be136ee | 2026-07-02 | APPROVE | Ingest crosswalk accepted; ragged headers halt typed and all gates green. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
