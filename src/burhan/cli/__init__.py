@@ -1,0 +1,100 @@
+"""Burhān CLI (FR-1401): ``run``, ``rerun``, ``certify``, ``doctor``.
+
+One command starts a run; no interactive input is required after Gate 1
+(FR-306 — the orchestrator exposes no input channel at all). ``run`` and
+``rerun`` refuse cleanly while no production stage implementations are
+registered (stages land with M05+): the engine never improvises a pipeline
+(FR-1302 doctrine). Exit codes map terminal states:
+0 = COMPLETED / COMPLETED_TO_BOUNDARY · 10 = HALTED_INTEGRITY ·
+11 = HALTED_VERIFICATION · 12 = HALTED_GATE · 1 = doctor not green.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+from burhan.cli.doctor import production_inputs, run_doctor
+from burhan.core.errors import BurhanHalt
+from burhan.core.orchestrator import PIPELINE, Stage
+
+app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
+
+EXIT_BY_STATE = {
+    "COMPLETED": 0,
+    "COMPLETED_TO_BOUNDARY": 0,
+    "HALTED_INTEGRITY": 10,
+    "HALTED_VERIFICATION": 11,
+    "HALTED_GATE": 12,
+}
+
+
+def _production_registry() -> dict[str, Stage]:
+    """Stage implementations land contract by contract (M05+)."""
+    return {}
+
+
+def _refuse_if_stages_missing() -> None:
+    registry = _production_registry()
+    missing = [name for name in PIPELINE if name not in registry]
+    if missing:
+        typer.echo(
+            "no run: production stage implementations land with M05+ contracts; "
+            "the engine refuses cleanly rather than improvises (FR-1302 doctrine). "
+            f"Missing stages: {', '.join(missing)}."
+        )
+        raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
+
+
+@app.command()
+def run(study_dir: Path) -> None:
+    """Execute a full study run from a study directory (headless after Gate 1)."""
+    _refuse_if_stages_missing()
+
+
+@app.command()
+def rerun(run_dir: Path) -> None:
+    """Re-execute a sealed run from its manifest and assert byte-identity."""
+    _refuse_if_stages_missing()
+
+
+@app.command()
+def certify() -> None:
+    """Validate the governed machine contracts in certification mode."""
+    from burhan.core.artifacts.schemas import GOVERNED_SCHEMA_FILES, load_schema
+    from burhan.core.playbook import Playbook, playbooks_dir
+    from burhan.core.policy import Policy, governance_dir
+    from burhan.core.registry import Registry
+
+    try:
+        policy = Policy.load(
+            governance_dir() / "decision_policy.template.yaml",
+            mode="certification",
+            playbook_path=playbooks_dir() / "CB_SEM_PLAYBOOK_v1.0.yaml",
+        )
+        typer.echo("decision policy: OK (D1-D3; playbook refs resolve)")
+        Registry.load(
+            governance_dir() / "protected_decisions.registry.yaml",
+            mode="certification",
+            policy=policy,
+        )
+        typer.echo("protected registry: OK (R1-R2; D3 pointer)")
+        Playbook.load(
+            playbooks_dir() / "CB_SEM_PLAYBOOK_v1.0.yaml", mode="certification", policy=policy
+        )
+        typer.echo("playbook: OK (P1-P5)")
+        for name in sorted(GOVERNED_SCHEMA_FILES):
+            load_schema(name)
+        typer.echo(f"schemas: OK ({len(GOVERNED_SCHEMA_FILES)} machine contracts load)")
+    except BurhanHalt as exc:
+        typer.echo(f"certification validation halted: {exc.message}")
+        raise typer.Exit(code=EXIT_BY_STATE.get(exc.run_state, 10)) from exc
+
+
+@app.command()
+def doctor() -> None:
+    """Verify the environment per 04_ENVIRONMENT_AND_STACK §9."""
+    report = run_doctor(production_inputs())
+    typer.echo(report.render())
+    raise typer.Exit(code=0 if report.passed else 1)
