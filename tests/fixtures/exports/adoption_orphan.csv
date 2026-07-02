@@ -1,0 +1,6 @@
+ResponseId,Q3,Q4_1,Q4_2,Q5_1,Q5_2,Q9_4,Q42,Progress,Finished,StartDate,SneakyExtra
+Response ID,I consent to participate in this study.,RS1 - We have sufficient budget for the tool.,RS2 - Funding for the tool is secured.,CU1 - Our culture rewards experimentation.,CU2 - New tools are welcomed here.,Attention check: please select 5.,What is the size of your firm?,Progress,Finished,Start Date,Undeclared column
+"{""ImportId"":""_recordId""}","{""ImportId"":""QID3""}","{""ImportId"":""QID4_1""}","{""ImportId"":""QID4_2""}","{""ImportId"":""QID5_1""}","{""ImportId"":""QID5_2""}","{""ImportId"":""QID9_4""}","{""ImportId"":""QID42""}","{""ImportId"":""progress""}","{""ImportId"":""finished""}","{""ImportId"":""startDate""}","{""ImportId"":""QIDX""}"
+R_001,1,5,4,6,5,5,2,100,1,2026-06-01 09:00,9
+R_002,1,3,3,4,4,5,3,100,1,2026-06-01 09:05,9
+R_003,1,6,7,5,6,5,1,95,0,2026-06-01 09:07,9
