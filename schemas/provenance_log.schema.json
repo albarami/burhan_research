@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "burhan:schemas/provenance_entry/v1",
+  "title": "ProvenanceEntry",
+  "description": "One entry in the append-only sanad log (NFR-301). Sufficient, in sequence, to reconstruct the run narrative without the researcher present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "seq", "ts", "stage", "actor", "event_type", "trigger", "effect"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "seq": { "type": "integer", "minimum": 1, "description": "Strictly increasing within a run." },
+    "ts": { "type": "string", "format": "date-time" },
+    "stage": { "enum": ["ingest", "contract", "gate1", "power", "prep", "assumptions", "measurement", "structural", "effects", "robustness", "narrate", "gate2", "package"] },
+    "actor": { "enum": ["policy", "invariant", "reconciler", "gate", "worker", "orchestrator", "operator"] },
+    "event_type": {
+      "enum": [
+        "rule_fired", "row_drop", "case_recovered", "item_flag", "item_deletion",
+        "modification_applied", "estimator_determined", "invariant_pass", "invariant_fail",
+        "verification_pass", "verification_flag", "verification_halt",
+        "gate_verdict", "advisory_issued", "halt", "artifact_written", "stage_complete"
+      ]
+    },
+    "rule_ref": { "type": "string", "description": "Policy/playbook rule ID where applicable (FR-1201)." },
+    "trigger": { "type": "string", "description": "What condition caused this event." },
+    "effect": { "type": "string", "description": "What changed as a result (counts, values, states)." },
+    "artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "details": { "type": "object", "additionalProperties": true }
+  }
+}

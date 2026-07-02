@@ -1,0 +1,23 @@
+# environments & caches
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+# secrets & machine-local config
+.env
+*.env
+*.local.yaml
+# R
+workers/r/renv/library/
+workers/r/renv/staging/
+.Rhistory
+.RData
+# studies are engine-external (FR-1402) — never committed even if placed here
+studies/
+# OS noise
+.DS_Store
+Thumbs.db

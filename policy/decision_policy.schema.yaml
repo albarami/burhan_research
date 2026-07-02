@@ -1,0 +1,185 @@
+# Burhān — decision policy schema (docs/07_policy/decision_policy.schema.yaml)
+# JSON Schema draft 2020-12 in YAML. The policy is the operational rulebook
+# (Concept §10.1, FR-1201): numeric operating parameters and operational
+# selections. Methodological thresholds live in the playbook, never here.
+# Rule IDs referenced by DecisionEntry.rule_id and playbook policy_ref are the
+# dotted paths of leaves in this document (e.g. prep.inclusion_threshold).
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "burhan:schemas/decision_policy/v1"
+title: DecisionPolicy
+type: object
+additionalProperties: false
+required: [schema_version, meta, gates, power, prep, estimator, measurement, effects, verification, reporting]
+properties:
+  schema_version: { const: 1 }
+
+  meta:
+    type: object
+    additionalProperties: false
+    required: [version, owner, status]
+    properties:
+      version: { type: string, pattern: "^[0-9]+\\.[0-9]+$" }
+      owner:   { type: string }
+      status:  { enum: [draft, approved] }   # production runs require approved
+      notes:   { type: string }
+
+  gates:
+    type: object
+    additionalProperties: false
+    required: [max_retries]
+    properties:
+      max_retries: { type: integer, minimum: 1, maximum: 5 }   # FR-303
+
+  power:
+    type: object
+    additionalProperties: false
+    required: [montecarlo]
+    properties:
+      montecarlo:
+        type: object
+        additionalProperties: false
+        required: [replications]
+        properties:
+          replications: { type: integer, minimum: 500 }
+
+  prep:
+    type: object
+    additionalProperties: false
+    required: [inclusion_threshold, duplicates, attention_checks, straightliner,
+               item_missing_flag_pct, missing_treatment, outliers]
+    properties:
+      inclusion_threshold:                    # FR-502; playbook PB-02
+        type: object
+        additionalProperties: false
+        required: [min_completion_pct, basis]
+        properties:
+          min_completion_pct: { type: number, minimum: 50, maximum: 100 }
+          basis: { enum: [model_items] }      # completion measured on model items only
+      duplicates:
+        type: object
+        additionalProperties: false
+        required: [keys, action]
+        properties:
+          keys:   { type: array, minItems: 1, items: { enum: [response_id, ip_plus_duration, identical_model_vector] } }
+          action: { enum: [drop_later_keep_first] }
+      attention_checks:
+        type: object
+        additionalProperties: false
+        required: [action_on_fail]
+        properties:
+          action_on_fail: { enum: [drop, flag_only] }
+      straightliner:
+        type: object
+        additionalProperties: false
+        required: [method, min_block_length, action]
+        properties:
+          method: { enum: [zero_variance_within_block, longstring] }
+          min_block_length: { type: integer, minimum: 5 }
+          action: { enum: [drop, flag_only] }
+      item_missing_flag_pct:                  # item-level missingness worth flagging
+        type: number
+        minimum: 5
+        maximum: 50
+      missing_treatment:                      # FR-503/504; PB-03
+        type: object
+        additionalProperties: false
+        required: [primary, alternative, mi_imputations, mnar_action]
+        properties:
+          primary:     { const: fiml }        # FIML is the fixed primary (FR-504)
+          alternative: { const: multiple_imputation }
+          mi_imputations: { type: integer, minimum: 20 }
+          mnar_action: { enum: [flag_with_sensitivity_note] }
+      outliers:                               # PB-04
+        type: object
+        additionalProperties: false
+        required: [univariate_z, mahalanobis_p, treatment]
+        properties:
+          univariate_z: { type: number, minimum: 2.5, maximum: 4.0 }
+          mahalanobis_p: { type: number, exclusiveMinimum: 0, maximum: 0.01 }
+          treatment: { enum: [retain_with_sensitivity, remove_with_sensitivity] }
+
+  estimator:
+    type: object
+    additionalProperties: false
+    required: [default, robust_trigger, wlsmv_conditions]
+    properties:
+      default: { const: ml }
+      robust_trigger:                          # PB-07 within-method adjustment
+        type: object
+        additionalProperties: false
+        required: [on_mardia_violation]
+        properties:
+          on_mardia_violation: { const: mlr }
+      wlsmv_conditions:
+        type: object
+        additionalProperties: false
+        required: [max_categories_for_categorical, severe_skew_abs, severe_kurtosis_abs]
+        properties:
+          max_categories_for_categorical: { type: integer, minimum: 2, maximum: 6 }
+          severe_skew_abs:     { type: number, minimum: 2 }
+          severe_kurtosis_abs: { type: number, minimum: 7 }
+
+  measurement:
+    type: object
+    additionalProperties: false
+    required: [item_deletion, respecification]
+    properties:
+      item_deletion:                           # FR-705; PB-13; registry PD-05
+        type: object
+        additionalProperties: false
+        required: [preauthorized]
+        properties:
+          preauthorized: { type: boolean }     # default false = protected
+          preauthorized_rules:                 # honored only when preauthorized: true
+            type: array
+            items: { enum: [loading_below_playbook_target, discriminant_violation, reliability_gain] }
+      respecification:                         # PB-14 cap (methodological rule in playbook)
+        type: object
+        additionalProperties: false
+        required: [max_modifications]
+        properties:
+          max_modifications: { type: integer, minimum: 0, maximum: 5 }
+
+  effects:
+    type: object
+    additionalProperties: false
+    required: [bootstrap]
+    properties:
+      bootstrap:                               # FR-802; PB-17
+        type: object
+        additionalProperties: false
+        required: [resamples, ci_type, ci_level]
+        properties:
+          resamples: { type: integer, minimum: 1000 }
+          ci_type:   { enum: [bias_corrected] }
+          ci_level:  { type: number, exclusiveMinimum: 0.8, exclusiveMaximum: 1 }
+
+  verification:
+    type: object
+    additionalProperties: false
+    required: [prep_cell_tolerance, estimate_abs_tolerance, halt_multiplier]
+    properties:
+      prep_cell_tolerance: { type: number, minimum: 0 }       # 0 = exact match (FR-501)
+      estimate_abs_tolerance: { type: number, exclusiveMinimum: 0 }  # defaults; certified parity map refines (FR-902)
+      halt_multiplier: { type: number, minimum: 2 }            # halt when |delta| > multiplier x tolerance (FR-903)
+
+  reporting:
+    type: object
+    additionalProperties: false
+    required: [rounding_decimals, p_reporting]
+    properties:
+      rounding_decimals:
+        type: object
+        additionalProperties: false
+        required: [estimates, fit_indices, p_values]
+        properties:
+          estimates:   { type: integer, minimum: 2, maximum: 4 }
+          fit_indices: { type: integer, minimum: 2, maximum: 4 }
+          p_values:    { type: integer, minimum: 2, maximum: 4 }
+      p_reporting: { enum: [exact_with_floor_001] }   # report exact p; "< .001" below floor
+
+# Loader cross-checks beyond JSON Schema:
+#   D1  meta.status == approved required for production runs
+#   D2  every playbook policy_ref resolves to a leaf path in this document (P3)
+#   D3  measurement.item_deletion.preauthorized_rules present only when
+#       preauthorized: true; registry PD-05 delegation must point here

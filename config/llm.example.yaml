@@ -1,0 +1,10 @@
+# Copy to ~/.config/burhan/llm.yaml and pin model strings (docs/04 §5).
+# Startup fails if lineage(node_a) == lineage(node_c) (FR-304).
+nodes:
+  node_a: { provider: anthropic, model: "<pin>", lineage: anthropic.claude, temperature: 0, max_retries: 2 }
+  node_c: { provider: openai,    model: "<pin>", lineage: openai.gpt,       temperature: 0, max_retries: 2 }
+  node_b: { provider: anthropic, model: "<pin>", lineage: anthropic.claude, temperature: 0 }
+providers:
+  anthropic: { api_key_env: ANTHROPIC_API_KEY }
+  openai:    { api_key_env: OPENAI_API_KEY }
+  local_lmstudio: { base_url: "http://localhost:1234/v1", api_key_env: LMSTUDIO_API_KEY }

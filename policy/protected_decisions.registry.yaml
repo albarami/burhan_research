@@ -1,0 +1,87 @@
+# Burhān — Protected Decisions Registry (docs/07_policy/protected_decisions.registry.yaml)
+# Decisions with theoretical or supervisory standing (Concept §10.2). The
+# system CANNOT execute these; enforcement is architectural, not advisory
+# (FR-1202). Exactly one entry is delegable, and only by explicit policy
+# pre-authorization.
+schema_version: 1
+
+meta:
+  version: "1.0"
+  owner: "Researcher (method owner); supervisor where applicable"
+  status: draft                # -> approved at sign-off (R1)
+  notes: >
+    When accumulated evidence challenges a protected decision, the system runs
+    to the boundary of what remains defensible and emits METHOD_ADVISORY.md
+    (diagnostics, recommendation, citations, impact); the human decides, the
+    decision and rationale enter the provenance chain, and the re-run proceeds
+    under the amended mandate (Concept §10.2, FR-1203).
+
+protected_decisions:
+  - id: PD-01
+    title: Analytical paradigm change
+    description: >
+      Any change of analytical paradigm or method family: CB-SEM <-> PLS-SEM,
+      quantitative <-> qualitative, or replacement of the approved method.
+      Includes method binding at run start: the engine loads exactly the
+      declared playbook and may not substitute another.
+    enforcement: no_code_path
+    system_response: method_advisory
+    delegable: false
+    concept_ref: "§4.3, §10.2"
+    requirement_refs: [FR-1202, FR-1203, FR-1303]
+
+  - id: PD-02
+    title: Hypothesis addition, removal, or modification
+    description: >
+      Any change to the hypothesis set in the validated study contract —
+      adding, dropping, redirecting, or re-signing hypotheses, including
+      converting a failed direct hypothesis into a different effect type.
+    enforcement: no_code_path
+    system_response: method_advisory
+    delegable: false
+    concept_ref: "§10.2"
+    requirement_refs: [FR-1202]
+
+  - id: PD-03
+    title: Construct redefinition, merging, or splitting
+    description: >
+      Any change to construct identity or structure — merging constructs that
+      fail discriminant validity, splitting constructs, reassigning items
+      across constructs, or altering a declared higher-order structure
+      (dimensions, approach, or structural carry).
+    enforcement: no_code_path
+    system_response: method_advisory
+    delegable: false
+    concept_ref: "§9.5, §10.2"
+    requirement_refs: [FR-1202, FR-803]
+
+  - id: PD-04
+    title: Deviation from a validated instrument
+    description: >
+      Any departure from a validated published instrument beyond the designed
+      adaptation recorded in the contract — rewording, rescaling, or
+      restructuring validated scales. Detected deviations are prominently
+      flagged; executing one is human-only.
+    enforcement: recommend_only
+    system_response: recommendation
+    delegable: false
+    concept_ref: "§9.7, §10.2"
+    requirement_refs: [FR-708, FR-1202]
+
+  - id: PD-05
+    title: Item deletion (protected by default)
+    description: >
+      Removal of any item from a modeled construct. By default the system may
+      only DETECT candidates and surface them as recommendations with the full
+      dual-trigger evidence. Autonomous execution exists behind exactly one
+      switch — decision_policy measurement.item_deletion.preauthorized — and
+      even when pre-authorized, the PB-13 protocol binds in full: one item at
+      a time with full re-estimation, dual trigger, three-item floor
+      (deletion-locked below three designed items), validated-instrument
+      flagging, complete before/after audit.
+    enforcement: recommend_only
+    system_response: recommendation
+    delegable: true
+    delegation_ref: measurement.item_deletion.preauthorized
+    concept_ref: "§9.7, §10.2"
+    requirement_refs: [FR-705, FR-706, FR-707, FR-708, FR-1202]

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "burhan:schemas/results_store_entry/v1",
+  "title": "ResultsStoreEntry",
+  "description": "One statistic in the append-only results store (FR-1001). Written only by statistical stages; Node B consumes IDs, never values (FR-1002). ID grammar per docs/05_schemas/00_README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "value", "stage", "engine", "playbook_step", "created", "hash"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^(power|prep|assumptions|measurement|structural|effects|robustness)\\.[a-z_]+(\\.([A-Za-z0-9_]+(->[A-Za-z0-9_]+)?))*(\\.[a-z_0-9]+)?$",
+      "description": "Unique per run. Path segments use ASCII '->'."
+    },
+    "value": { "type": ["number", "string", "boolean"] },
+    "se": { "type": "number" },
+    "ci_low": { "type": "number" },
+    "ci_high": { "type": "number" },
+    "ci_level": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+    "p": { "type": "number", "minimum": 0, "maximum": 1 },
+    "df": { "type": "number", "minimum": 0 },
+    "n": { "type": "integer", "minimum": 1 },
+    "unit": { "type": "string" },
+    "stage": { "enum": ["power", "prep", "assumptions", "measurement", "structural", "effects", "robustness"] },
+    "engine": { "enum": ["r_lavaan", "py_semopy", "py_pandas"] },
+    "playbook_step": { "type": "string", "description": "Playbook step ID that produced this statistic (compliance linkage, FR-1106)." },
+    "params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Method parameters needed to interpret the value (e.g., estimator, resamples, standardization)."
+    },
+    "created": { "type": "string", "format": "date-time" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 over canonical JSON of all fields except hash." }
+  }
+}

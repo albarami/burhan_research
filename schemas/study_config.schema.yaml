@@ -1,0 +1,246 @@
+# Burhān — study_config schema (docs/05_schemas/study_config.schema.yaml)
+# JSON Schema draft 2020-12, expressed in YAML.
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "burhan:schemas/study_config/v1"
+title: StudyConfig
+description: >
+  The validated study contract (FR-201). Encodes the instrument AS DESIGNED —
+  never a post-hoc retained subset; item retention is a pipeline output
+  (FR-202). Ambiguity at extraction is a hard failure, never a default
+  (FR-205).
+type: object
+additionalProperties: false
+required: [schema_version, meta, methodology, instrument, constructs, model, hypotheses, data]
+properties:
+  schema_version: { const: 1 }
+
+  meta:
+    type: object
+    additionalProperties: false
+    required: [study_id, title, source_documents]
+    properties:
+      study_id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{2,63}$" }
+      title: { type: string }
+      created: { type: string, format: date-time }
+      source_documents:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [role, path, sha256]
+          properties:
+            role: { enum: [study_document, data_dictionary, instrument_export] }
+            path: { type: string }
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+  methodology:
+    type: object
+    additionalProperties: false
+    required: [declared, playbook_id, playbook_version, design]
+    properties:
+      declared: { enum: [CB_SEM] }            # PLS_SEM / THEMATIC reserved for later phases (FR-1304)
+      playbook_id: { type: string }            # e.g. CB_SEM_PLAYBOOK
+      playbook_version: { type: string }       # e.g. "1.0"
+      design: { enum: [cross_sectional] }
+      notes: { type: string }
+      # NOTE: no estimator field by design — estimator determination is a
+      # pipeline output under policy (FR-602/603), never a contract input.
+
+  instrument:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        minItems: 2
+        items:
+          type: object
+          additionalProperties: false
+          required: [code, text, construct_ref, scale, reverse_coded]
+          properties:
+            code: { type: string, pattern: "^[A-Za-z0-9_]+$" }
+            text: { type: string }
+            construct_ref: { type: string }    # must resolve to a first-order construct code
+            reverse_coded: { type: boolean }
+            source: { type: string }           # instrument provenance / citation
+            column_hint: { type: string }      # export header hint for the crosswalk (FR-103)
+            scale:
+              type: object
+              additionalProperties: false
+              required: [type, min, max]
+              properties:
+                type: { enum: [likert, numeric] }
+                min: { type: integer }
+                max: { type: integer }
+                labels: { type: array, items: { type: string } }
+
+  constructs:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [code, name, level, measurement]
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9_]+$" }
+        name: { type: string }
+        level: { enum: [first_order, second_order] }
+        measurement: { enum: [reflective] }    # formative reserved (Phase 2)
+        indicators:                            # first_order: item codes (designed pool)
+          type: array
+          minItems: 2
+          items: { type: string }
+        components:                            # second_order: first-order construct codes
+          type: array
+          minItems: 2
+          items: { type: string }
+        source: { type: string }               # scale citation
+      allOf:
+        - if: { properties: { level: { const: first_order } } }
+          then: { required: [indicators] }
+        - if: { properties: { level: { const: second_order } } }
+          then: { required: [components] }
+
+  higher_order:
+    type: object
+    additionalProperties: false
+    description: Required iff any construct is second_order (validator-enforced).
+    required: [approach, structural_carry]
+    properties:
+      approach: { enum: [repeated_indicator, two_stage] }      # FR-701, cited in playbook
+      structural_carry: { enum: [full_hierarchy, latent_scores] }  # FR-803
+      citation: { type: string }
+
+  model:
+    type: object
+    additionalProperties: false
+    required: [exogenous, endogenous]
+    properties:
+      exogenous: { type: array, items: { type: string }, minItems: 1 }
+      endogenous: { type: array, items: { type: string }, minItems: 1 }
+      mediators: { type: array, items: { type: string } }
+      moderators:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [variable, on_path]
+          properties:
+            variable: { type: string }
+            on_path: { type: string, pattern: "^[A-Za-z0-9_]+->[A-Za-z0-9_]+$" }
+      controls:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [variable, "on"]
+          properties:
+            variable: { type: string }
+            "on": { type: array, items: { type: string }, minItems: 1 }
+
+  hypotheses:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, effect, from, to, sign]
+      properties:
+        id: { type: string, pattern: "^H[0-9]+[a-z]?$" }
+        effect: { enum: [direct, indirect, total] }
+        from: { type: string }
+        to: { type: string }
+        sign: { enum: [positive, negative] }
+        via: { type: array, items: { type: string } }   # required for indirect (validator-enforced)
+        statement: { type: string }
+
+  data:
+    type: object
+    additionalProperties: false
+    required: [file, format]
+    properties:
+      file: { type: string }
+      format: { enum: [csv, xlsx] }
+      export_dialect: { enum: [qualtrics, generic] }
+      header_rows: { type: integer, minimum: 1, maximum: 3 }
+      id_column: { type: string }
+      consent_column: { type: string }
+      completion:
+        type: object
+        additionalProperties: false
+        properties:
+          progress_column: { type: string }
+          finished_column: { type: string }
+      attention_checks:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [column, expected]
+          properties:
+            column: { type: string }
+            expected: { type: string }
+      demographics:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [code, column_hint, type]
+          properties:
+            code: { type: string }
+            column_hint: { type: string }
+            type: { enum: [categorical, ordinal, numeric, text] }
+      metadata_columns:
+        type: array
+        items: { type: string }
+        description: >
+          Platform-generated export columns (timestamps, IP, distribution
+          channel, …). Excluded from analysis but declared so the zero-orphan
+          accounting (FR-507) can pass.
+      ignored_item_columns:
+        type: array
+        items: { type: string }
+        description: >
+          Columns of designed instrument sections deliberately OUTSIDE the
+          model (out-of-model constructs). Declaring them is a researcher-owned
+          model-scope statement; leaving a column undeclared is an orphan and
+          a hard failure (FR-507). Never used to hide a retained-item choice —
+          item retention within modeled constructs remains a pipeline output
+          (FR-202).
+
+  crosswalk:
+    type: object
+    additionalProperties: false
+    properties:
+      mode: { enum: [auto, provided] }
+      provided_map:
+        type: object
+        additionalProperties: { type: string }   # export column -> item code
+
+  protected_overrides:
+    type: object
+    additionalProperties: false
+    properties:
+      item_deletion_preauthorized: { type: boolean, default: false }   # FR-705
+
+# ---------------------------------------------------------------------------
+# Cross-field rules enforced by the contract validator module (beyond JSON
+# Schema expressiveness); each failure is a hard failure (FR-205, FR-507):
+#   V1  every instrument item construct_ref resolves to a first_order construct
+#   V2  every first_order construct's indicators exist in instrument.items,
+#       and the DESIGNED pool meets the playbook minimum
+#   V3  every second_order component resolves to a first_order construct;
+#       higher_order block present iff any construct is second_order
+#   V4  every model/hypothesis construct reference resolves; via[] required
+#       and resolvable for every indirect hypothesis
+#   V5  hypothesis (id) unique; (from,to,effect) consistent with
+#       structural reachability
+#   V6  column accounting: after crosswalk, every export column resolves to
+#       exactly one role — model item, demographic, consent, id, completion,
+#       attention check, metadata_columns, or ignored_item_columns.
+#       Unaccounted column = orphan = hard failure (zero-orphan rule)
+#   V7  reverse_coded declared here is the ONLY source of reverse-coding;
+#       prep verifies by sign-flip (FR-507) and never infers additions
+# ---------------------------------------------------------------------------

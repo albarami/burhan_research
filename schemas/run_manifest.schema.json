@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "burhan:schemas/run_manifest/v1",
+  "title": "RunManifest",
+  "description": "Everything required to re-execute a run bit-identically (NFR-101) and to prove what governed it (NFR-102). Written incrementally; sealed at terminal state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "study_id", "started", "state", "master_seed", "engine", "hashes", "environment", "llm_nodes", "stages"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z$" },
+    "study_id": { "type": "string" },
+    "started": { "type": "string", "format": "date-time" },
+    "finished": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["PENDING", "RUNNING", "COMPLETED", "COMPLETED_TO_BOUNDARY", "HALTED_INTEGRITY", "HALTED_VERIFICATION", "HALTED_GATE"] },
+    "master_seed": { "type": "integer", "minimum": 0 },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "git_commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "git_commit": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" },
+        "git_dirty": { "type": "boolean" }
+      }
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["study_config", "decision_policy", "protected_registry", "playbook", "prompts", "uv_lock", "renv_lock"],
+      "properties": {
+        "study_config": { "$ref": "#/$defs/sha" },
+        "decision_policy": { "$ref": "#/$defs/sha" },
+        "protected_registry": { "$ref": "#/$defs/sha" },
+        "playbook": { "$ref": "#/$defs/sha" },
+        "prompts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_a", "node_b", "node_c"],
+          "properties": {
+            "node_a": { "$ref": "#/$defs/versioned_sha" },
+            "node_b": { "$ref": "#/$defs/versioned_sha" },
+            "node_c": { "$ref": "#/$defs/versioned_sha" }
+          }
+        },
+        "uv_lock": { "$ref": "#/$defs/sha" },
+        "renv_lock": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "r", "os", "doctor_passed"],
+      "properties": {
+        "python": { "type": "string" },
+        "r": { "type": "string" },
+        "os": { "type": "string" },
+        "blas_threads": { "type": "integer", "const": 1 },
+        "max_workers": { "type": "integer", "minimum": 1 },
+        "doctor_passed": { "type": "boolean", "const": true },
+        "doctor_report_sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "llm_nodes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_a", "node_b", "node_c"],
+      "properties": {
+        "node_a": { "$ref": "#/$defs/llm_node" },
+        "node_b": { "$ref": "#/$defs/llm_node" },
+        "node_c": { "$ref": "#/$defs/llm_node" }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "state", "started"],
+        "properties": {
+          "stage": { "enum": ["ingest", "contract", "gate1", "power", "prep", "assumptions", "measurement", "structural", "effects", "robustness", "narrate", "gate2", "package"] },
+          "state": { "enum": ["PASSED", "FAILED", "SKIPPED_BOUNDARY"] },
+          "started": { "type": "string", "format": "date-time" },
+          "finished": { "type": "string", "format": "date-time" },
+          "artifact_tree_sha256": { "$ref": "#/$defs/sha" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "advisory": { "type": "boolean", "default": false },
+    "seal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_tree_root", "sealed_at"],
+      "properties": {
+        "hash_tree_root": { "$ref": "#/$defs/sha" },
+        "sealed_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "versioned_sha": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "llm_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "lineage", "temperature"],
+      "properties": {
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "lineage": { "type": "string", "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$" },
+        "temperature": { "type": "number", "minimum": 0 },
+        "prompt_version": { "type": "string" }
+      }
+    }
+  }
+}

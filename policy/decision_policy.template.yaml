@@ -1,0 +1,85 @@
+# Burhān — decision policy template (docs/07_policy/decision_policy.template.yaml)
+# The standing operational rulebook (Concept §10.1). Copy per deployment,
+# adjust values, set meta.status: approved after review. Every leaf path is a
+# rule_id citable in DECISION_LOG entries. Methodological thresholds live in
+# the playbook — if a number here would change what the discipline requires
+# rather than how this machine runs it, it is in the wrong file.
+schema_version: 1
+
+meta:
+  version: "1.0"
+  owner: "Researcher (method owner)"
+  status: draft                # -> approved at sign-off (D1)
+  notes: >
+    Defaults reflect the adopted positions of the first validation study's
+    methodology chapter where operational; all values remain per-study
+    overridable via studies/<study>/config/.
+
+gates:
+  max_retries: 2               # bounded Node C reject->revise cycles (FR-303)
+
+power:
+  montecarlo:
+    replications: 1000         # simsem replications for a priori power (PB-01)
+
+prep:
+  inclusion_threshold:
+    min_completion_pct: 90     # recover partials at >= 90% of model items (FR-502)
+    basis: model_items
+  duplicates:
+    keys: [response_id, identical_model_vector]
+    action: drop_later_keep_first
+  attention_checks:
+    action_on_fail: drop
+  straightliner:
+    method: zero_variance_within_block
+    min_block_length: 8        # zero variance across a block of >= 8 model items
+    action: drop
+  item_missing_flag_pct: 20    # flag any item missing in > 20% of cases
+  missing_treatment:
+    primary: fiml              # fixed primary (FR-504); PB-03
+    alternative: multiple_imputation
+    mi_imputations: 20         # when MI selected: m = 20, Rubin's-rules pooling
+    mnar_action: flag_with_sensitivity_note
+  outliers:
+    univariate_z: 3.29         # |z| > 3.29 (p < .001 two-tailed)
+    mahalanobis_p: 0.001       # multivariate criterion
+    treatment: retain_with_sensitivity   # retain; report sensitivity comparison
+
+estimator:
+  default: ml
+  robust_trigger:
+    on_mardia_violation: mlr   # ML -> MLR (Satorra–Bentler) — autonomous, within-method
+  wlsmv_conditions:
+    max_categories_for_categorical: 4    # < 5 categories => categorical treatment
+    severe_skew_abs: 2                   # OR severe non-normality beyond these
+    severe_kurtosis_abs: 7
+
+measurement:
+  item_deletion:
+    preauthorized: false       # PROTECTED BY DEFAULT (FR-705; registry PD-05).
+                               # Candidates surface as recommendations only.
+    # preauthorized_rules:     # honored only if preauthorized: true, and even
+    #   - loading_below_playbook_target   # then PB-13 protocol fully applies
+    #   - discriminant_violation
+  respecification:
+    max_modifications: 3       # hard cap on cumulative within-construct
+                               # error covariances (PB-14)
+
+effects:
+  bootstrap:
+    resamples: 5000            # bias-corrected bootstrap (PB-17, FR-802)
+    ci_type: bias_corrected
+    ci_level: 0.95
+
+verification:
+  prep_cell_tolerance: 0       # preparation must match exactly, cell-by-cell (FR-501)
+  estimate_abs_tolerance: 0.001  # default; certified parity map refines per scope (FR-902)
+  halt_multiplier: 10          # |delta| > 10x tolerance => HALTED_VERIFICATION (FR-903)
+
+reporting:
+  rounding_decimals:
+    estimates: 3
+    fit_indices: 3
+    p_values: 3
+  p_reporting: exact_with_floor_001   # exact p to 3 dp; below .001 report "< .001"

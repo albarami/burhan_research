@@ -1,0 +1,20 @@
+name: ci
+on:
+  push: { branches: ["main", "tc/**"] }
+  pull_request:
+jobs:
+  governed-documents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install jsonschema pyyaml pytest ruff
+      - name: studies exclusion guard (FR-1402)
+        run: |
+          test ! -d studies || { echo "studies/ must never be committed"; exit 1; }
+      - name: lint
+        run: ruff check .
+      - name: governed document validation
+        run: pytest tests/unit/test_governed_documents.py -q
+  # mypy/coverage jobs activate with TC-01 (first src code)

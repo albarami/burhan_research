@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "burhan:schemas/decision_entry/v1",
+  "title": "DecisionEntry",
+  "description": "One operational decision resolved by policy (FR-1201). DECISION_LOG.md is rendered from this JSONL; the rendered file adds nothing the entries do not contain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "seq", "ts", "stage", "decision_point", "rule_id", "rule_version", "inputs", "decision", "rationale"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "stage": { "enum": ["ingest", "contract", "power", "prep", "assumptions", "measurement", "structural", "effects", "robustness", "narrate", "package"] },
+    "decision_point": {
+      "enum": [
+        "inclusion_threshold", "duplicate_rule", "attention_check_rule", "straightliner_rule",
+        "missing_mechanism", "missing_treatment", "outlier_treatment",
+        "estimator_determination", "bootstrap_parameters",
+        "respecification", "item_deletion_recommendation", "item_deletion_executed",
+        "higher_order_carry", "fit_band_evaluation", "reporting_format", "other"
+      ]
+    },
+    "rule_id": { "type": "string", "description": "decision_policy.yaml rule identifier." },
+    "rule_version": { "type": "string", "description": "Policy version containing the rule." },
+    "inputs": { "type": "object", "additionalProperties": true, "description": "The evidence the rule evaluated (test statistics, counts, thresholds)." },
+    "decision": { "type": "string" },
+    "rationale": { "type": "string", "description": "Plain-language justification with citation key(s) from the playbook where applicable." },
+    "alternatives_considered": { "type": "array", "items": { "type": "string" } },
+    "flags": { "type": "array", "items": { "type": "string" }, "description": "FLAGS.md entry IDs raised by this decision, if any." },
+    "protected": { "type": "boolean", "default": false, "description": "True only for entries recording a HUMAN protected decision (e.g., pre-authorized deletion executed); the system never sets this for its own actions (FR-1202)." }
+  }
+}
