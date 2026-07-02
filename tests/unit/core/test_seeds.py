@@ -103,6 +103,15 @@ def test_derive_is_deterministic_across_calls() -> None:  # AT-M01-3
     assert derive(12345, "prep") == derive(12345, "prep", 0)
 
 
+def test_derive_values_are_pinned_forever() -> None:  # NFR-101 regression lock
+    # Frozen at first implementation: any change to the derivation constants
+    # (salt, encodings, output width) silently breaks byte-identical reruns,
+    # so these exact values are load-bearing.
+    assert derive(424242, "prep", 3) == 781967108
+    assert derive(0, "ingest", 0) == 1416785546
+    assert derive(2**64 - 1, "package", 2**32 - 1) == 891217379
+
+
 def test_derive_output_range_fits_r_and_numpy_seeding() -> None:
     for stage in STAGES:
         seed = derive(0, stage, 0)
