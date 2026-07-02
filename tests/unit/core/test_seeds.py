@@ -44,9 +44,7 @@ RFC5869_VECTORS = [
         bytes.fromhex("f0f1f2f3f4f5f6f7f8f9"),
         42,
         bytes.fromhex(
-            "3cb25f25faacd57a90434f64d0362f2a"
-            "2d2d0a90cf1a5a4c5db02d56ecc4c5bf"
-            "34007208d5b887185865"
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
         ),
     ),
     (
@@ -87,9 +85,7 @@ RFC5869_VECTORS = [
         b"",
         42,
         bytes.fromhex(
-            "8da4e775a563c18f715f802a063c5a31"
-            "b8a11f5c5ee1879ec3454e5f3c738d2d"
-            "9d201395faa4b61a96c8"
+            "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
         ),
     ),
 ]
