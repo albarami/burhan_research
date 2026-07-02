@@ -110,9 +110,9 @@ def test_playbook_valid_and_crosschecks() -> None:
     idpat = re.compile(
         r"^(power|prep|assumptions|measurement|structural|effects|robustness)\.[a-z_]+$"
     )
-    assert all(
-        idpat.fullmatch(o) for s in pb["steps"] for o in s.get("outputs", [])
-    ), "P4: output prefix grammar"
+    assert all(idpat.fullmatch(o) for s in pb["steps"] for o in s.get("outputs", [])), (
+        "P4: output prefix grammar"
+    )
 
 
 def test_policy_registry_valid_and_refs_resolve() -> None:
