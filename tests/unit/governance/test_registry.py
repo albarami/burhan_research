@@ -171,6 +171,57 @@ def test_preauthorized_flip_yields_permit_token(
     assert "protected" not in raw
 
 
+@pytest.mark.parametrize("decision_id", ["PD-01", "PD-02", "PD-03", "PD-04"])
+def test_only_pd05_may_be_delegable_enforced_at_load(
+    tmp_path: Path, decision_id: str
+) -> None:  # REJECT-3 fix: registry declares exactly one delegable entry
+    index = ALL_PD_IDS.index(decision_id)
+
+    def delegate_it(data: dict[str, Any]) -> None:
+        data["protected_decisions"][index]["delegable"] = True
+        data["protected_decisions"][index]["delegation_ref"] = (
+            "measurement.item_deletion.preauthorized"  # resolvable ref on purpose
+        )
+
+    with pytest.raises(IntegrityHalt) as excinfo:
+        Registry.load(registry_copy(tmp_path, mutate=delegate_it), mode="certification")
+    assert excinfo.value.to_report()["details"]["id"] == decision_id
+
+
+def test_guard_is_incapable_of_tokens_for_non_pd05_even_on_malformed_registry(
+    log: DecisionLog, tmp_path: Path
+) -> None:  # REJECT-3 fix: defense in depth (FR-1202)
+    # Bypass the load path deliberately: construct a malformed Registry object
+    # whose PD-01 claims delegable with a resolvable ref.
+    from gov_util import REGISTRY_TEMPLATE, load_yaml
+
+    def preauthorize(data: dict[str, Any]) -> None:
+        data["measurement"]["item_deletion"]["preauthorized"] = True
+
+    policy = Policy.load(policy_copy(tmp_path, mutate=preauthorize), mode="certification")
+    data = load_yaml(REGISTRY_TEMPLATE)
+    data["protected_decisions"][0]["delegable"] = True
+    data["protected_decisions"][0]["delegation_ref"] = "measurement.item_deletion.preauthorized"
+    malformed = Registry(data, source=REGISTRY_TEMPLATE)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        malformed.guard("PD-01", policy=policy, log=log, stage="structural", evidence=_evidence())
+    assert "PD-05" in excinfo.value.message  # names the only lawful delegable id
+    assert not (tmp_path / "decisions.jsonl").exists()  # and no entry was logged
+
+
+def test_verify_delegations_also_rejects_non_pd05_delegables(
+    tmp_path: Path, policy_default: Policy
+) -> None:  # REJECT-3 fix: belt at the cross-check layer too
+    from gov_util import REGISTRY_TEMPLATE, load_yaml
+
+    data = load_yaml(REGISTRY_TEMPLATE)
+    data["protected_decisions"][1]["delegable"] = True
+    data["protected_decisions"][1]["delegation_ref"] = "measurement.item_deletion.preauthorized"
+    malformed = Registry(data, source=REGISTRY_TEMPLATE)
+    with pytest.raises(IntegrityHalt):
+        malformed.verify_delegations(policy_default)
+
+
 def test_non_delegable_decisions_never_yield_tokens_even_when_preauthorized(
     registry: Registry, log: DecisionLog, tmp_path: Path
 ) -> None:  # FR-1202

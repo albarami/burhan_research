@@ -31,6 +31,9 @@ from burhan.core.policy import (
     load_governance_yaml,
 )
 
+# The governed registry declares EXACTLY ONE delegable entry
+# (protected_decisions.registry.yaml header; Concept §10.2): PD-05.
+_DELEGABLE_DECISION_ID = "PD-05"
 _PD05_DELEGATION_TARGET = "measurement.item_deletion.preauthorized"
 _PD05_RULES_PATH = "measurement.item_deletion.preauthorized_rules"
 
@@ -103,6 +106,15 @@ class Registry:
                     )
                 )
             seen.add(decision_id)
+            if entry.get("delegable", False) and decision_id != _DELEGABLE_DECISION_ID:
+                halt(
+                    IntegrityHalt(
+                        "the governed registry declares exactly one delegable entry "
+                        f"({_DELEGABLE_DECISION_ID}); no other protected decision may "
+                        "be delegable (FR-1202)",
+                        report={"path": str(path), "id": decision_id},
+                    )
+                )
         if mode == "production" and policy is None:
             halt(
                 IntegrityHalt(
@@ -148,6 +160,15 @@ class Registry:
         for decision_id, entry in self._entries.items():
             if not entry.get("delegable", False):
                 continue
+            if decision_id != _DELEGABLE_DECISION_ID:
+                halt(
+                    IntegrityHalt(
+                        "the governed registry declares exactly one delegable entry "
+                        f"({_DELEGABLE_DECISION_ID}); no other protected decision may "
+                        "be delegable (FR-1202)",
+                        report={"id": decision_id},
+                    )
+                )
             ref = str(entry["delegation_ref"])
             found, _ = policy._lookup(ref)  # noqa: SLF001 — same-layer cross-check
             if not found:
@@ -187,6 +208,17 @@ class Registry:
         advisory path (FR-1203).
         """
         entry = self.entry(decision_id)
+        if entry.get("delegable", False) and decision_id != _DELEGABLE_DECISION_ID:
+            # Defense in depth: even a malformed Registry object constructed
+            # outside the load path cannot mint tokens for PD-01..PD-04
+            # (FR-1202: no execution path for protected decisions).
+            halt(
+                IntegrityHalt(
+                    "malformed registry: token issuance is impossible for any "
+                    f"decision but {_DELEGABLE_DECISION_ID} (FR-1202)",
+                    report={"id": decision_id},
+                )
+            )
         if not entry.get("delegable", False):
             return Recommendation(
                 decision_id=decision_id,
