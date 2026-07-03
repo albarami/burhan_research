@@ -286,15 +286,10 @@ def montecarlo_power(
     # integer, and lie within [0, replications] — anything else is a
     # malformed worker result (standards §4).
     converged = result.get("converged")
-    if (
-        isinstance(converged, bool)
-        or not isinstance(converged, int)
-        or not 0 <= converged <= reps
-    ):
+    if isinstance(converged, bool) or not isinstance(converged, int) or not 0 <= converged <= reps:
         halt(
             IntegrityHalt(
-                "Monte Carlo result carries a missing or malformed converged "
-                "count",
+                "Monte Carlo result carries a missing or malformed converged count",
                 report={
                     "converged": repr(converged),
                     "replications": reps,
