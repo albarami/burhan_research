@@ -279,42 +279,136 @@ def test_identical_seeds_produce_identical_power(tmp_path: Path) -> None:  # AT-
     assert first["converged"] == second["converged"]
 
 
-def test_pinned_seeds_match_exactly_one_certified_environment_pin(tmp_path: Path) -> None:
-    # The certified-pin registry (tests/fixtures/known_answers/
-    # montecarlo_pins.json) records EXACT expected outputs per certified
-    # environment under the governed 04 §7 note (researcher amendment
-    # 2026-07-03) — no tolerance, no probabilistic assertions, no
-    # environment-variable keying. The observed pair must equal exactly
-    # one registry entry (both seeds from the same entry); an environment
-    # matching no certified pin FAILS here — it is not certified for
-    # pinned statistical outputs. Run-to-run determinism within every
-    # environment is proven by the identical-seed test above.
+def _registry() -> dict[str, object]:
     import json
 
-    registry = json.loads(
+    loaded = json.loads(
         (REPO / "tests" / "fixtures" / "known_answers" / "montecarlo_pins.json").read_text(
             encoding="utf-8"
         )
     )
-    eleven = _run_montecarlo(tmp_path, 11, "mc-pin11")
-    twelve = _run_montecarlo(tmp_path, 12, "mc-pin12")
-    observed = {
-        "seed_11": eleven["power"],
-        "seed_12": twelve["power"],
-        "converged": (eleven["converged"], twelve["converged"]),
-    }
-    matches = [
-        entry["environment"]
-        for entry in registry["certified_pins"]
-        if entry["seed_11"] == observed["seed_11"]
-        and entry["seed_12"] == observed["seed_12"]
-        and (entry["converged"], entry["converged"]) == observed["converged"]
-    ]
-    assert len(matches) == 1, (
-        f"observed outputs {observed} match {len(matches)} certified pins — "
-        "this environment is not certified for pinned statistical outputs "
-        "(04 §7)"
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _assert_within_band(
+    observed: dict[str, float], anchors: dict[str, float], band: float, *, seed_name: str
+) -> None:
+    """Typed band check (E-R5): any focal value outside anchor ± band halts."""
+    from burhan.core.errors import halt
+
+    for path, anchor in anchors.items():
+        value = observed.get(path)
+        if value is None or abs(float(value) - float(anchor)) > band:
+            halt(
+                IntegrityHalt(
+                    "Monte Carlo output outside the certified tolerance band "
+                    "(04 §7 cross-platform numeric policy)",
+                    report={
+                        "seed": seed_name,
+                        "path": path,
+                        "band": band,
+                        "deviation": None
+                        if value is None
+                        else round(abs(float(value) - float(anchor)), 6),
+                    },
+                )
+            )
+
+
+def test_registry_integrity_unconditional() -> None:
+    # E-R5: runs identically with or without the workstation marker.
+    registry = _registry()
+    assert registry["certified_marker"] == "BURHAN_CERTIFIED_WORKSTATION"
+    assert int(registry["replications"]) == 400  # type: ignore[arg-type]
+    band = registry["band"]
+    assert isinstance(band, dict) and 0.0 < float(band["value"]) < 0.2
+    assert "MCSE" in str(band["justification"])
+    workstation = registry["workstation"]
+    assert isinstance(workstation, dict)
+    assert "BURHAN_CERTIFIED_WORKSTATION" in str(workstation["captured"])
+    for seed_key in ("seed_11", "seed_12"):
+        anchors = workstation[seed_key]  # type: ignore[index]
+        assert set(anchors) == {"CUL~RES", "INT~CUL"}
+        for value in anchors.values():
+            assert 0.0 <= float(value) <= 1.0
+    assert int(workstation["converged"]) == 400  # type: ignore[arg-type]
+
+
+def test_certified_anchor_values(tmp_path: Path) -> None:
+    # E-R5 semantics: on the certified workstation (governed marker set),
+    # the R=400 anchors are asserted EXACTLY (byte-equal quantized values,
+    # converged exact) — a mismatch is broken certification. On any other
+    # host, the SAME anchors are asserted within the registry's tolerance
+    # band (typed halt outside it) plus exact convergence — a value
+    # assertion, never a skip. Identical-seed determinism is asserted
+    # separately and everywhere by the test above.
+    import os
+
+    registry = _registry()
+    replications = int(registry["replications"])  # type: ignore[arg-type]
+    workstation = registry["workstation"]
+    band = float(registry["band"]["value"])  # type: ignore[index, arg-type]
+    marked = os.environ.get("BURHAN_CERTIFIED_WORKSTATION") == "1"
+
+    eleven = montecarlo_power(
+        _golden_config(),
+        n=200,
+        seed=11,
+        policy=_policy(),
+        playbook=_playbook(),
+        rworker=RWorker(),
+        run_dir=tmp_path,
+        call_id="anchor-11",
+        replications=replications,
     )
+    twelve = montecarlo_power(
+        _golden_config(),
+        n=200,
+        seed=12,
+        policy=_policy(),
+        playbook=_playbook(),
+        rworker=RWorker(),
+        run_dir=tmp_path,
+        call_id="anchor-12",
+        replications=replications,
+    )
+    assert eleven["converged"] == replications
+    assert twelve["converged"] == replications
+    if marked:
+        assert eleven["power"] == workstation["seed_11"]  # type: ignore[index]
+        assert twelve["power"] == workstation["seed_12"]  # type: ignore[index]
+    else:
+        _assert_within_band(
+            eleven["power"],  # type: ignore[arg-type]
+            workstation["seed_11"],  # type: ignore[index, arg-type]
+            band,
+            seed_name="seed_11",
+        )
+        _assert_within_band(
+            twelve["power"],  # type: ignore[arg-type]
+            workstation["seed_12"],  # type: ignore[index, arg-type]
+            band,
+            seed_name="seed_12",
+        )
+
+
+def test_band_check_negative_control() -> None:
+    # E-R5: materially wrong Monte Carlo outputs FAIL the band check —
+    # a silently broken simulation cannot ride the tolerance. Runs in
+    # every environment, marker or not.
+    registry = _registry()
+    anchors = registry["workstation"]["seed_11"]  # type: ignore[index]
+    band = float(registry["band"]["value"])  # type: ignore[index, arg-type]
+    wrong = {path: float(value) + 0.20 for path, value in anchors.items()}  # type: ignore[union-attr]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _assert_within_band(wrong, anchors, band, seed_name="seed_11")  # type: ignore[arg-type]
+    assert "tolerance band" in excinfo.value.message
+    within = {path: float(value) + 0.03 for path, value in anchors.items()}  # type: ignore[union-attr]
+    _assert_within_band(within, anchors, band, seed_name="seed_11")  # type: ignore[arg-type]
+    missing = {next(iter(anchors)): float(next(iter(anchors.values())))}  # type: ignore[union-attr, call-overload, arg-type]
+    with pytest.raises(IntegrityHalt):
+        _assert_within_band(missing, anchors, band, seed_name="seed_11")  # type: ignore[arg-type]
 
 
 def test_replications_default_from_policy(tmp_path: Path) -> None:

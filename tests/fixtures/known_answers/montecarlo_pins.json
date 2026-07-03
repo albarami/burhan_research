@@ -1,20 +1,17 @@
 {
-  "authority": "04_ENVIRONMENT_AND_STACK.md SS7 (researcher amendment 2026-07-03): certified pinned statistical outputs are recorded per certified environment; cross-environment agreement is governed by the FR-902 tolerance regime, never bitwise equality.",
-  "model": "golden config (build_golden(11)), n=200, replications=40, alpha=0.05, PB-01 population (loadings .70 / paths .30 / corr .30)",
-  "certified_pins": [
-    {
-      "environment": "reference-workstation: CRAN apt R 4.5.2, source-built renv stack (E-R3)",
-      "captured": "2026-07-03",
-      "seed_11": { "CUL~RES": 0.925, "INT~CUL": 0.95 },
-      "seed_12": { "CUL~RES": 0.925, "INT~CUL": 0.85 },
-      "converged": 40
-    },
-    {
-      "environment": "ci-runner: r-lib R 4.5.2 on ubuntu-latest, source-built renv stack (no RSPM)",
-      "captured": "2026-07-03 (runs 28672027588, 28671492033: seed-12 CUL~RES resolves one boundary replication, 1/40, differently on the r-lib base-R build)",
-      "seed_11": { "CUL~RES": 0.925, "INT~CUL": 0.95 },
-      "seed_12": { "CUL~RES": 0.95, "INT~CUL": 0.85 },
-      "converged": 40
-    }
-  ]
+  "authority": "04_ENVIRONMENT_AND_STACK.md SS7 (E-R5, researcher-approved 2026-07-03): certified pins are recorded for the reference workstation only, identified by BURHAN_CERTIFIED_WORKSTATION=1; other environments assert values against the same anchors within the stated Monte Carlo tolerance band — never skipped, never bitwise across hosts.",
+  "model": "golden config (build_golden(11)), n=200, alpha=0.05, PB-01 population (loadings .70 / paths .30 / corr .30)",
+  "replications": 400,
+  "certified_marker": "BURHAN_CERTIFIED_WORKSTATION",
+  "band": {
+    "value": 0.05,
+    "justification": "quantum 1/400 = 0.0025; MCSE(p ~= .92, R=400) = sqrt(.92*.08/400) ~= 0.0136; 0.05 ~= 3.7*MCSE — tolerates host-FP re-randomization of marginal replications (observed cross-host movement at R=40 was <= 2*MCSE-equivalent) while systematic divergence lands far outside; E-R5 evidence pack, PR #12."
+  },
+  "workstation": {
+    "environment": "reference-workstation: CRAN apt R 4.5.2, source-built renv stack (E-R3)",
+    "captured": "2026-07-03, with BURHAN_CERTIFIED_WORKSTATION=1 verified in-session",
+    "seed_11": { "CUL~RES": 0.92, "INT~CUL": 0.9325 },
+    "seed_12": { "CUL~RES": 0.9, "INT~CUL": 0.905 },
+    "converged": 400
+  }
 }
