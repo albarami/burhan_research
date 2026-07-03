@@ -89,6 +89,16 @@ class NChainAccountant:
         recovered: Sequence[str] = (),
     ) -> None:
         """Record one link; exactness is enforced at the case level."""
+        for label, sequence in (("dropped", dropped), ("recovered", recovered)):
+            repeated = sorted({case for case in sequence if list(sequence).count(case) > 1})
+            if repeated:
+                halt(
+                    IntegrityHalt(
+                        "N-chain double-count: case repeated within a single "
+                        f"link's {label} list (FR-506 exact sums)",
+                        report={"link": name, "cases": repeated},
+                    )
+                )
         current = set(self._current)
         for case in dropped:
             if case in self._dropped_ever:

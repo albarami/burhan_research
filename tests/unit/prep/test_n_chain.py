@@ -50,6 +50,40 @@ def test_planted_double_count_halts() -> None:  # AT-M08-3 (FR-506)
     assert "R_002" in str(excinfo.value.to_report()["details"])
 
 
+def test_duplicate_case_within_one_dropped_list_halts() -> None:  # REJECT-TC08a fix 1
+    # Reviewer probe: three raw cases, one dropped twice in the same link
+    # produced entering=3, dropped_n=2, leaving=2 with no halt.
+    accountant = NChainAccountant(("R_001", "R_002", "R_003"))
+    with pytest.raises(IntegrityHalt) as excinfo:
+        accountant.apply("duplicates", dropped=("R_002", "R_002"))
+    assert "double-count" in excinfo.value.message
+    details = excinfo.value.to_report()["details"]
+    assert details["link"] == "duplicates"
+    assert "R_002" in str(details)
+
+
+def test_duplicate_case_within_one_recovered_list_halts() -> None:  # REJECT-TC08a fix 1
+    accountant = NChainAccountant(("R_001", "R_002", "R_003"))
+    with pytest.raises(IntegrityHalt) as excinfo:
+        accountant.apply("partial_recovery", recovered=("R_001", "R_001"))
+    assert "double-count" in excinfo.value.message
+    assert excinfo.value.to_report()["details"]["link"] == "partial_recovery"
+
+
+def test_no_serialized_link_can_break_the_leaving_identity() -> None:  # REJECT-TC08a fix 2
+    # The identity leaving == entering - dropped_n holds on every link a
+    # finalized chain serializes; the duplicate shapes that could break it
+    # halt before any link is constructed.
+    accountant = NChainAccountant(CASES)
+    accountant.apply("consent")
+    accountant.apply("duplicates", dropped=("R_002", "R_003"))
+    accountant.apply("partial_recovery", dropped=("R_004",), recovered=("R_006", "R_007"))
+    chain = accountant.finalize()
+    for link in chain.to_payload()["links"]:  # type: ignore[union-attr]
+        assert link["leaving"] == link["entering"] - link["dropped_n"]  # type: ignore[index]
+    assert chain.final_n == chain.raw_n - sum(link.dropped_n for link in chain.links)
+
+
 def test_unknown_case_in_a_drop_list_halts() -> None:
     accountant = NChainAccountant(CASES)
     with pytest.raises(IntegrityHalt) as excinfo:
