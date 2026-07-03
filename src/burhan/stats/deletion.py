@@ -41,6 +41,11 @@ def _is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _valid_attestation(value: object) -> TypeGuard[str]:
+    """FR-707: content-validity evidence is a non-blank string, nothing less."""
+    return isinstance(value, str) and value.strip() != ""
+
+
 def deletion_signal_bound(playbook: Playbook) -> float:
     """The PB-09 deletion-candidate loading bound, parsed from rule text."""
     for criterion in playbook.criteria("PB-09"):
@@ -148,7 +153,7 @@ def run_deletion_protocol(
     rworker: RWorker,
     run_dir: Any,
     call_id: str,
-    content_validity: Mapping[str, str],
+    content_validity: Mapping[str, object],
     approach: str | None = None,
 ) -> dict[str, Any]:
     """PB-13 in full: recommend under protection, execute under permit."""
@@ -209,7 +214,7 @@ def _execute_under_permit(
     rworker: RWorker,
     run_dir: Any,
     call_id: str,
-    content_validity: Mapping[str, str],
+    content_validity: Mapping[str, object],
     approach: str | None,
 ) -> dict[str, Any]:
     floor = deletion_floor(playbook)
@@ -240,7 +245,9 @@ def _execute_under_permit(
         for candidate in deletion_candidates(report, playbook=playbook):
             construct = candidate["construct"]
             item = candidate["item"]
-            if token.granted_rules and candidate["signal"] not in token.granted_rules:
+            # FR-705: only explicitly listed signals are authorized — an
+            # empty granted-rules tuple authorizes nothing, not everything.
+            if candidate["signal"] not in token.granted_rules:
                 _skip(candidate, "signal_not_granted")
             elif designed.get(construct, 0) < floor:
                 _skip(candidate, "deletion_locked")
@@ -248,6 +255,8 @@ def _execute_under_permit(
                 _skip(candidate, "three_item_floor")
             elif item not in content_validity:
                 _skip(candidate, "content_validity_missing")
+            elif not _valid_attestation(content_validity[item]):
+                _skip(candidate, "content_validity_invalid")
             else:
                 chosen = candidate
                 break

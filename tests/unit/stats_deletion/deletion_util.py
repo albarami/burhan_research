@@ -62,6 +62,7 @@ def policy_with(
     *,
     cap: int | None = None,
     rules: list[str] | None = None,
+    omit_rules: bool = False,
 ) -> Policy:
     """Load the template policy, toggling the PD-05 switch (and cap) only."""
     import yaml
@@ -69,7 +70,7 @@ def policy_with(
     source = (REPO / "policy" / "decision_policy.template.yaml").read_text(encoding="utf-8")
     data = yaml.safe_load(source)
     data["measurement"]["item_deletion"]["preauthorized"] = preauthorized
-    if preauthorized:
+    if preauthorized and not omit_rules:
         data["measurement"]["item_deletion"]["preauthorized_rules"] = (
             rules if rules is not None else ["loading_below_playbook_target"]
         )

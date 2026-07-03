@@ -37,12 +37,13 @@ def _run(
     constructs: dict[str, list[str]],
     preauthorized: bool,
     results: list[dict],
-    content_validity: dict[str, str],
+    content_validity: dict[str, object],
     sources: dict[str, str] | None = None,
     item_sources: dict[str, str] | None = None,
     rules: list[str] | None = None,
+    omit_rules: bool = False,
 ) -> tuple[dict, SequenceWorker]:
-    policy = policy_with(preauthorized, tmp_path, rules=rules)
+    policy = policy_with(preauthorized, tmp_path, rules=rules, omit_rules=omit_rules)
     worker = SequenceWorker(results)
     outcome = run_deletion_protocol(
         frame_for([code for items in constructs.values() for code in items]),
@@ -124,6 +125,53 @@ def test_statistical_signal_alone_is_insufficient(tmp_path: Path) -> None:
     assert [(s["item"], s["reason"]) for s in outcome["skipped"]] == [
         ("A5", "content_validity_missing")
     ]
+
+
+@pytest.mark.parametrize(
+    "attestation",
+    ["", "   ", "\t\n", None, 7],
+    ids=["blank", "whitespace", "tabs_newlines", "null", "nonstring"],
+)
+def test_invalid_attestation_does_not_satisfy_dual_trigger(
+    tmp_path: Path, attestation: object
+) -> None:
+    # FR-707: the content-validity leg needs actual evidence that the
+    # construct domain remains intact. A key with a blank, whitespace-only,
+    # null, or non-string value is not evidence — the item is skipped with
+    # a reason naming the invalid attestation, and nothing executes.
+    outcome, worker = _run(
+        tmp_path,
+        constructs=_FIVE_FOUR,
+        preauthorized=True,
+        results=[worker_result(_FIVE_FOUR, {"A5": 0.55})],
+        content_validity={"A5": attestation},
+    )
+    assert outcome["deletions"] == []
+    assert len(worker.calls) == 1
+    assert [(s["item"], s["reason"]) for s in outcome["skipped"]] == [
+        ("A5", "content_validity_invalid")
+    ]
+
+
+@pytest.mark.parametrize("empty_via", ["empty_list", "absent_key"], ids=str)
+def test_empty_granted_rules_authorize_no_signal(tmp_path: Path, empty_via: str) -> None:
+    # FR-705: deletion rules must be EXPLICITLY pre-authorized. A permit
+    # minted while the policy lists no preauthorized_rules carries
+    # granted_rules=() — which authorizes nothing, not everything.
+    outcome, worker = _run(
+        tmp_path,
+        constructs=_FIVE_FOUR,
+        preauthorized=True,
+        results=[worker_result(_FIVE_FOUR, {"A5": 0.55})],
+        content_validity={"A5": "redundant with A1"},
+        rules=[] if empty_via == "empty_list" else None,
+        omit_rules=empty_via == "absent_key",
+    )
+    assert outcome["mode"] == "executed"
+    assert outcome["token"].granted_rules == ()
+    assert outcome["deletions"] == []
+    assert len(worker.calls) == 1
+    assert [(s["item"], s["reason"]) for s in outcome["skipped"]] == [("A5", "signal_not_granted")]
 
 
 def test_three_item_floor_enforced(tmp_path: Path) -> None:
