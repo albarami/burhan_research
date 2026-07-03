@@ -257,8 +257,8 @@ def test_pinned_seeds_reproduce_fixed_expected_outputs(tmp_path: Path) -> None:
     # but lavaan's optimizer runs on the platform BLAS, and one boundary
     # replication of seed 12 resolves differently between the workstation
     # (source builds) and the CI runner (RSPM binaries) — a 1/40 = 0.025
-    # step. This is exactly why the doctor pins the workstation BLAS
-    # (blas_and_env_pinning; NFR-101 reproducibility is per-environment);
+    # step. Platform-keyed pins are governed: 04 SS7 (researcher amendment
+    # 2026-07-03) records certification pins per certified environment;
     # within each environment the values are bit-stable, and the
     # identical-seed test above proves run-to-run determinism everywhere.
     import os
