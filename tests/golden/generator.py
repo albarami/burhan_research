@@ -282,6 +282,64 @@ def build_golden(seed: int, *, with_defects: bool = True) -> GoldenStudy:
     return GoldenStudy(config=_config_dict(), rows=rows, manifest=manifest)
 
 
+def build_adversarial(seed: int) -> GoldenStudy:
+    """The overlapping-defect fixture (AT-M08-3; TC-08c matrix).
+
+    Each planted case carries two defect classes at once; the N-chain must
+    drop it exactly once at the FIRST applicable link (or keep it, when
+    neither class drops). Ground truth lives in
+    ``manifest["adversarial_overlaps"]`` as
+    ``{case, classes, dropped_at}`` with ``dropped_at == ""`` for the
+    surviving case (a recovered partial that is also a flagged, retained
+    outlier).
+    """
+    rng = np.random.default_rng(seed)
+    manifest: dict[str, list[dict[str, str]]] = {name: [] for name in DEFECT_CLASSES}
+    manifest["adversarial_overlaps"] = []
+    rows = _header_rows()
+    for index in range(1, 33):  # golden-sized base: the outlier criterion
+        # needs enough clean cases that one extreme cannot inflate the sd
+        stored = _stored(_raw_item_values(rng), un_reverse_cu4=False)
+        rows.append(_case_row(f"R_{index:03d}", stored, rng))
+
+    def plant(
+        case_id: str, items: list[str], classes: str, dropped_at: str, *, attention: str = "5"
+    ) -> None:
+        rows.append(_case_row(case_id, items, rng, attention=attention))
+        manifest["adversarial_overlaps"].append(
+            {"case": case_id, "classes": classes, "dropped_at": dropped_at}
+        )
+
+    # id-duplicate that also fails the attention check → leaves at duplicates
+    plant(
+        "R_001",
+        list(rows[3][_ITEM_OFFSET:_ATTENTION_INDEX]),
+        "duplicates+attention_fails",
+        "duplicates",
+        attention="2",
+    )
+    manifest["adversarial_overlaps"][-1]["case"] = "R_001#2"
+    # straight-liner carrying an out-of-range cell → leaves at straight_liners
+    liner = _stored(_raw_item_values(rng), un_reverse_cu4=False)
+    liner[:8] = ["4"] * 8
+    liner[10] = "9"
+    plant("R_033", liner, "straight_liners+out_of_range", "straight_liners")
+    # attention failure that is also a below-threshold partial → leaves at attention
+    partial = _stored(_raw_item_values(rng), un_reverse_cu4=False)
+    for position in (1, 5, 9):
+        partial[position] = ""
+    plant("R_034", partial, "attention_fails+partials_dropped", "attention_checks", attention="3")
+    # extreme responder missing one cell → recovered partial AND flagged outlier,
+    # retained under the policy treatment: survives every link
+    plant(
+        "R_035",
+        ["7", "7", "6", "1", "7", "7", "6", "2", "7", "6", "7", ""],
+        "known_outliers+partials_recovered",
+        "",
+    )
+    return GoldenStudy(config=_config_dict(), rows=rows, manifest=manifest)
+
+
 def build_missingness_fixture(kind: Literal["mcar", "mnar"], seed: int) -> GoldenStudy:
     """AT-M08-7 fixtures: same instrument, engineered missingness only.
 

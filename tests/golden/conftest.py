@@ -1,0 +1,9 @@
+"""Certification-suite bootstrap: make src/ and this directory importable."""
+
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+for _path in (str(_ROOT / "src"), str(_ROOT / "tests" / "golden")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)

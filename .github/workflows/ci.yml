@@ -17,4 +17,33 @@ jobs:
         run: ruff check .
       - name: governed document validation
         run: pytest tests/unit/test_governed_documents.py -q
-  # mypy/coverage jobs activate with TC-01 (first src code)
+
+  # Permanent regression gate (FR-1504): the full battery including the
+  # golden certification suite (tests/golden/) and dual-path R parity.
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: sync locked environment
+        run: uv sync --frozen
+      - uses: r-lib/actions/setup-r@v2
+        with: { r-version: "4.5.2", use-public-rspm: true }
+      - name: restore renv-locked R packages
+        run: |
+          Rscript -e "install.packages('renv', repos = 'https://cloud.r-project.org')"
+          Rscript -e "renv::restore(project = 'workers/r', prompt = FALSE)"
+      - name: ruff
+        run: uv run ruff check .
+      - name: ruff format check
+        run: uv run ruff format --check .
+      - name: mypy strict
+        run: uv run mypy src/
+      - name: pytest with coverage (unit + golden certification)
+        run: uv run pytest --cov=src --cov-report=term
+      - name: lintr (R workers)
+        run: |
+          Rscript -e "install.packages('lintr', repos = 'https://cloud.r-project.org')"
+          Rscript -e "lints <- unlist(lapply(list.files('workers/r', pattern = '[.]R$', full.names = TRUE), lintr::lint)); print(lints); quit(status = as.integer(length(lints) > 0))"
