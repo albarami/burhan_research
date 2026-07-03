@@ -1,0 +1,318 @@
+# CORRUPTION FIXTURE (TC-07 / AT-M07-1): RS3 reverse_coded flag missing
+# Derived from schemas/study_config.example.yaml with exactly one seeded defect.
+schema_version: 1
+meta:
+  study_id: example-adoption-2026
+  title: Organizational Enablers of Tool Adoption (Illustrative)
+  created: '2026-07-02T09:00:00Z'
+  source_documents:
+  - role: study_document
+    path: inputs/study.docx
+    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - role: data_dictionary
+    path: inputs/instrument.docx
+    sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+methodology:
+  declared: CB_SEM
+  playbook_id: CB_SEM_PLAYBOOK
+  playbook_version: '1.0'
+  design: cross_sectional
+  notes: Estimator intentionally not declared; determined by pipeline policy.
+instrument:
+  items:
+  - code: RS1
+    text: We have sufficient budget for the tool.
+    construct_ref: RES
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Doe & Roe (2019)
+    column_hint: Q4_1
+  - code: RS2
+    text: Funding for the tool is secured.
+    construct_ref: RES
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Doe & Roe (2019)
+    column_hint: Q4_2
+  - code: RS3
+    text: Resource constraints block the tool.
+    construct_ref: RES
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Doe & Roe (2019)
+    column_hint: Q4_3
+  - code: CU1
+    text: Our culture rewards experimentation.
+    construct_ref: CUL
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Doe & Roe (2019)
+    column_hint: Q5_1
+  - code: CU2
+    text: New tools are welcomed here.
+    construct_ref: CUL
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Doe & Roe (2019)
+    column_hint: Q5_2
+  - code: CU3
+    text: People here resist new ways of working.
+    construct_ref: CUL
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: true
+    source: Doe & Roe (2019)
+    column_hint: Q5_3
+  - code: PU1
+    text: The tool improves my productivity.
+    construct_ref: PU
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q6_1
+  - code: PU2
+    text: The tool is useful in my job.
+    construct_ref: PU
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q6_2
+  - code: PU3
+    text: The tool enhances my effectiveness.
+    construct_ref: PU
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q6_3
+  - code: AT1
+    text: Using the tool is a good idea.
+    construct_ref: ATT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Ajzen (1991)
+    column_hint: Q7_1
+  - code: AT2
+    text: I like working with the tool.
+    construct_ref: ATT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Ajzen (1991)
+    column_hint: Q7_2
+  - code: AT3
+    text: The tool makes work pleasant.
+    construct_ref: ATT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Ajzen (1991)
+    column_hint: Q7_3
+  - code: IN1
+    text: I intend to use the tool next quarter.
+    construct_ref: INT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q8_1
+  - code: IN2
+    text: I will recommend the tool to colleagues.
+    construct_ref: INT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q8_2
+  - code: IN3
+    text: I plan to use the tool whenever possible.
+    construct_ref: INT
+    scale:
+      type: likert
+      min: 1
+      max: 7
+    reverse_coded: false
+    source: Davis (1989)
+    column_hint: Q8_3
+constructs:
+- code: RES
+  name: Resources
+  level: first_order
+  measurement: reflective
+  indicators:
+  - RS1
+  - RS2
+  - RS3
+  source: Doe & Roe (2019)
+- code: CUL
+  name: Culture
+  level: first_order
+  measurement: reflective
+  indicators:
+  - CU1
+  - CU2
+  - CU3
+  source: Doe & Roe (2019)
+- code: ENB
+  name: Enablement
+  level: second_order
+  measurement: reflective
+  components:
+  - RES
+  - CUL
+- code: PU
+  name: Perceived Usefulness
+  level: first_order
+  measurement: reflective
+  indicators:
+  - PU1
+  - PU2
+  - PU3
+  source: Davis (1989)
+- code: ATT
+  name: Attitude
+  level: first_order
+  measurement: reflective
+  indicators:
+  - AT1
+  - AT2
+  - AT3
+  source: Ajzen (1991)
+- code: INT
+  name: Intention
+  level: first_order
+  measurement: reflective
+  indicators:
+  - IN1
+  - IN2
+  - IN3
+  source: Davis (1989)
+higher_order:
+  approach: repeated_indicator
+  structural_carry: full_hierarchy
+  citation: Hair et al. (2019)
+model:
+  exogenous:
+  - ENB
+  endogenous:
+  - PU
+  - ATT
+  - INT
+  mediators:
+  - PU
+  - ATT
+  moderators: []
+  controls:
+  - variable: firm_size
+    'on':
+    - INT
+hypotheses:
+- id: H1
+  effect: direct
+  from: ENB
+  to: PU
+  sign: positive
+  statement: Enablement positively influences perceived usefulness.
+- id: H2
+  effect: direct
+  from: PU
+  to: ATT
+  sign: positive
+  statement: Perceived usefulness positively influences attitude.
+- id: H3
+  effect: direct
+  from: ATT
+  to: INT
+  sign: positive
+  statement: Attitude positively influences intention.
+- id: H4a
+  effect: direct
+  from: ENB
+  to: INT
+  sign: positive
+  statement: Enablement directly influences intention.
+- id: H4b
+  effect: indirect
+  from: ENB
+  to: INT
+  sign: positive
+  via:
+  - PU
+  - ATT
+  statement: Enablement indirectly influences intention through usefulness and attitude.
+data:
+  file: inputs/export.csv
+  format: csv
+  export_dialect: qualtrics
+  header_rows: 3
+  id_column: ResponseId
+  consent_column: Q3
+  completion:
+    progress_column: Progress
+    finished_column: Finished
+  attention_checks:
+  - column: Q9_4
+    expected: '5'
+  demographics:
+  - code: firm_size
+    column_hint: Q42
+    type: ordinal
+  - code: sector
+    column_hint: Q43
+    type: categorical
+  metadata_columns:
+  - StartDate
+  - EndDate
+  - Status
+  - IPAddress
+  - Progress
+  - Duration (in seconds)
+  - Finished
+  - RecordedDate
+  - ResponseId
+  - DistributionChannel
+  - UserLanguage
+  ignored_item_columns:
+  - Q9_1
+  - Q9_2
+  - Q9_3
+crosswalk:
+  mode: auto
+protected_overrides:
+  item_deletion_preauthorized: false
