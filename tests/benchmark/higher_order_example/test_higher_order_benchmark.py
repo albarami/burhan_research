@@ -14,7 +14,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from burhan.stats.measurement import run_measurement
 
 from burhan.core.artifacts.loader import validate_and_build
 from burhan.core.artifacts.models import StudyConfig
@@ -22,6 +21,7 @@ from burhan.core.errors import IntegrityHalt
 from burhan.core.playbook import Playbook
 from burhan.core.policy import Policy
 from burhan.core.rworker import RWorker
+from burhan.stats.measurement import run_measurement
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
