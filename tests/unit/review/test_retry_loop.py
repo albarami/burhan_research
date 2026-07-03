@@ -106,6 +106,23 @@ def test_schema_invalid_forever_exhausts_as_halted_gate_not_a_crash() -> None:  
     assert final["schema_invalid"] is True
 
 
+def test_whitespace_only_fix_consumes_a_retry_cycle() -> None:  # REJECT-TC07 fix 2
+    author = StubAuthor(['verdict: reject\nfixes: [" "]\n', approve_yaml()])
+    verdict = run_gate(gate="gate2", audit=author.audit, revise=author.revise, max_retries=2)
+    assert verdict.verdict == "approve"
+    assert len(author.revisions) == 1
+    assert "verdict schema violation" in author.revisions[0][0]
+
+
+def test_duplicate_mapping_keys_consume_a_retry_cycle() -> None:  # REJECT-TC07 fix 2
+    # A duplicate verdict key must never collapse into a smuggled approve.
+    author = StubAuthor(["verdict: reject\nverdict: approve\nfixes: []\n", approve_yaml()])
+    verdict = run_gate(gate="gate1", audit=author.audit, revise=author.revise, max_retries=2)
+    assert verdict.verdict == "approve"
+    assert len(author.revisions) == 1
+    assert "verdict schema violation" in author.revisions[0][0]
+
+
 def test_non_positive_retry_bound_is_a_defect() -> None:
     author = StubAuthor([approve_yaml()])
     with pytest.raises(IntegrityHalt) as excinfo:

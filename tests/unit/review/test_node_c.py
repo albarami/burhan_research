@@ -118,13 +118,35 @@ def test_gate2_rejects_unsupported_claim_and_omitted_hypothesis() -> None:  # AT
 
 
 def test_gate2_approves_a_complete_supported_draft() -> None:
+    draft = good_draft("good-draft")
+    assert "effects.indirect.H4b" in draft  # cites the real store row (REJECT-TC07 fix 1)
     node = _node({"good-draft": approve_yaml()})
     verdict = node.gate2(
-        findings_draft=good_draft("good-draft"),
+        findings_draft=draft,
         results_store=results_store_text(),
         decision_log=decision_log_text(),
     )
     assert verdict.verdict == "approve"
+
+
+def test_bad_draft_prompt_carries_h4b_evidence_outside_the_draft() -> None:  # REJECT-TC07 fix 1
+    # The omission defect must be provable from the artifacts Node C reviews:
+    # the draft never names H4b, while the store's authoritative row and the
+    # decision log's mediation entry do (FR-302).
+    draft = bad_draft("bad-draft")
+    assert "H4b" not in draft
+    provider = StubProvider(
+        {"bad-draft": reject_yaml("failed hypothesis H4b omitted from the draft")}
+    )
+    node = NodeC(settings(), provider_call=provider)
+    node.gate2(
+        findings_draft=draft,
+        results_store=results_store_text(),
+        decision_log=decision_log_text(),
+    )
+    prompt = provider.prompts[0]
+    assert "effects.indirect.H4b" in prompt  # store row reaches the reviewer
+    assert "H4b" in decision_log_text()  # the log's mediation decision names it too
 
 
 # -- prompt wiring ---------------------------------------------------------------------

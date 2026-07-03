@@ -30,6 +30,34 @@ from burhan.core.errors import GateExhausted, IntegrityHalt, halt
 _VERDICT_KEYS = frozenset({"verdict", "fixes"})
 
 
+def _first_duplicate_key(node: Any) -> str | None:
+    """First duplicate mapping key in a composed YAML node graph, if any.
+
+    ``yaml.safe_load`` silently collapses duplicates (last wins), which
+    would let ``verdict: reject`` / ``verdict: approve`` smuggle an
+    approve past the schema (FR-303 strictness). The composed node graph
+    still carries every key occurrence, and composing constructs no
+    Python objects — only ``safe_load`` ever builds values.
+    """
+    if isinstance(node, yaml.MappingNode):
+        seen: set[str] = set()
+        for key_node, value_node in node.value:
+            key = key_node.value
+            if isinstance(key, str):
+                if key in seen:
+                    return key
+                seen.add(key)
+            duplicate = _first_duplicate_key(key_node) or _first_duplicate_key(value_node)
+            if duplicate is not None:
+                return duplicate
+    elif isinstance(node, yaml.SequenceNode):
+        for child in node.value:
+            duplicate = _first_duplicate_key(child)
+            if duplicate is not None:
+                return duplicate
+    return None
+
+
 def default_template_dir() -> Path:
     """The versioned Node C prompt directory (AD-04)."""
     return Path(__file__).resolve().parents[3] / "prompts" / "node_c"
@@ -64,13 +92,16 @@ def parse_verdict(response: str) -> Verdict:
     """Parse a model response against the closed verdict schema (FR-303).
 
     The schema is exactly two keys — ``verdict: approve|reject`` and
-    ``fixes`` (a list of non-empty strings, non-empty iff reject). Any
-    violation returns a pseudo-reject marked ``schema_invalid`` so the
-    retry loop counts it as a reject cycle rather than crashing
-    (AT-M07-5; architecture §5: outputs failing schema validation count
-    as rejects).
+    ``fixes`` (a list of non-blank strings, non-empty iff reject) — parsed
+    with a duplicate-key-refusing loader. Any violation returns a
+    pseudo-reject marked ``schema_invalid`` so the retry loop counts it as
+    a reject cycle rather than crashing (AT-M07-5; architecture §5:
+    outputs failing schema validation count as rejects).
     """
     try:
+        duplicate = _first_duplicate_key(yaml.compose(response, Loader=yaml.SafeLoader))
+        if duplicate is not None:
+            return _schema_violation(f"duplicate mapping key: {duplicate!r}")
         raw = yaml.safe_load(response)
     except yaml.YAMLError as exc:
         return _schema_violation(f"not valid YAML: {exc}")
@@ -81,8 +112,10 @@ def parse_verdict(response: str) -> Verdict:
     if raw["verdict"] not in ("approve", "reject"):
         return _schema_violation("verdict must be approve or reject")
     fixes = raw["fixes"]
-    if not isinstance(fixes, list) or not all(isinstance(fix, str) and fix for fix in fixes):
-        return _schema_violation("fixes must be a list of non-empty strings")
+    if not isinstance(fixes, list) or not all(
+        isinstance(fix, str) and fix.strip() for fix in fixes
+    ):
+        return _schema_violation("fixes must be a list of non-blank strings")
     if raw["verdict"] == "approve" and fixes:
         return _schema_violation("approve must not carry fixes")
     if raw["verdict"] == "reject" and not fixes:

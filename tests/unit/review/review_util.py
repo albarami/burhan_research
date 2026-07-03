@@ -85,7 +85,11 @@ def reject_yaml(*fixes: str) -> str:
 
 
 def results_store_text() -> str:
-    """Fixture results store: H1 supported; H4a NOT supported (p=.41)."""
+    """Fixture results store: H1 supported; H4a and H4b NOT supported.
+
+    H4b's authoritative row is what makes a draft that omits H4b auditable
+    (FR-302 completeness): the omission is provable from the store alone.
+    """
     rows = [
         {
             "schema_version": "1.0",
@@ -111,6 +115,20 @@ def results_store_text() -> str:
             "created": "2026-07-01T00:00:00Z",
             "hash": "b" * 64,
         },
+        {
+            "schema_version": "1.0",
+            "id": "effects.indirect.H4b",
+            "value": 0.026,
+            "se": 0.019,
+            "ci_low": -0.008,
+            "ci_high": 0.071,
+            "ci_level": 0.95,
+            "stage": "effects",
+            "engine": "lavaan",
+            "playbook_step": "S8",
+            "created": "2026-07-01T00:00:00Z",
+            "hash": "c" * 64,
+        },
     ]
     import json
 
@@ -124,6 +142,8 @@ def decision_log_text() -> str:
             "| ts | rule | effect |",
             "|---|---|---|",
             "| 2026-07-01T00:00:00Z | estimator.default | MLR selected |",
+            "| 2026-07-01T00:00:00Z | effects.mediation.bootstrap | H4b indirect "
+            "effect tested; CI includes zero (effects.indirect.H4b) |",
         ]
     )
 
@@ -141,12 +161,13 @@ def bad_draft(variant: str) -> str:
 
 
 def good_draft(variant: str) -> str:
-    """Every hypothesis reported, including the unsupported one."""
+    """Every hypothesis reported, citing the real store rows — none omitted."""
     return "\n".join(
         [
             f"STUDY-VARIANT: {variant}",
             "Findings. H1 was supported (structural.path.H1).",
             "H4a was not supported (structural.path.H4a).",
-            "H4b is reported per the mediation results in the store.",
+            "H4b was not supported: the indirect effect's confidence interval",
+            "includes zero (effects.indirect.H4b).",
         ]
     )

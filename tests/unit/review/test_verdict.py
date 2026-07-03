@@ -37,8 +37,13 @@ def test_valid_reject_parses_with_exact_fixes() -> None:
         "verdict: reject\nfixes: not-a-list\n",  # fixes not a list
         "verdict: reject\nfixes: [3]\n",  # fix not a string
         "verdict: reject\nfixes: ['']\n",  # empty fix string
+        'verdict: reject\nfixes: [" "]\n',  # whitespace-only fix (REJECT-TC07 fix 2)
         "verdict: approve\nfixes: ['tighten X']\n",  # approve carrying fixes
         "verdict: reject\nfixes: []\n",  # reject without exact fixes
+        # duplicate mapping keys must never collapse silently (REJECT-TC07 fix 2):
+        "verdict: reject\nverdict: approve\nfixes: []\n",  # dup verdict smuggles approve
+        "verdict: reject\nfixes: ['fix A']\nfixes: ['fix B']\n",  # dup fixes key
+        "verdict: reject\nfixes: [{note: a, note: b}]\n",  # dup key nested in a fix
     ],
 )
 def test_schema_invalid_verdicts_become_pseudo_rejects(response: str) -> None:  # AT-M07-5
