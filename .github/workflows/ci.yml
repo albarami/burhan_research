@@ -37,11 +37,13 @@ jobs:
         # renv.lock hash.
         with: { r-version: "4.5.2", use-public-rspm: false }
       - name: system libraries for the governed R stack
-        # mirrors the researcher workstation (E-R3): MVN/car closures load
-        # GSL, curl, and nlopt shared libraries at runtime
+        # mirrors the researcher workstation (E-R3): the source-built
+        # closures need curl, ssl, GSL, nlopt, and libuv dev headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libgsl-dev libnlopt-dev cmake
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4-openssl-dev libssl-dev libgsl-dev libnlopt-dev \
+            libuv1-dev cmake
       - uses: actions/cache@v4
         with:
           path: |
