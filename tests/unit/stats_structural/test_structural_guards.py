@@ -54,6 +54,10 @@ def _result(fit: dict[str, Any] | None = None) -> dict[str, Any]:
             {"lhs": "F3", "rhs": "F2", "est": 0.790, "std": 0.6, "se": 0.09, "p": 0.001},
             {"lhs": "F4", "rhs": "F3", "est": 0.473, "std": 0.5, "se": 0.06, "p": 0.001},
         ],
+        "r_squared": [
+            {"construct": "F3", "r2": 0.59},
+            {"construct": "F4", "r2": 0.35},
+        ],
     }
 
 
@@ -284,6 +288,138 @@ def test_doctored_playbook_halts(doctor: Any) -> None:
         fit_bands(DoctoredPlaybook())  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("key", "bad_value"),
+    [
+        ("chisq", float("nan")),
+        ("chisq", -1.0),
+        ("cfi", float("nan")),
+        ("cfi", 1.2),
+        ("cfi", -0.1),
+        ("tli", float("nan")),
+        ("rmsea", float("inf")),
+        ("rmsea", -0.01),
+        ("rmsea_ci_lower", -0.1),
+        ("rmsea_ci_upper", float("inf")),
+        ("srmr", -0.01),
+        ("srmr", float("nan")),
+        ("pvalue", -0.1),
+        ("pvalue", 1.5),
+        ("pvalue", float("nan")),
+    ],
+    ids=lambda v: repr(v),
+)
+def test_nonfinite_or_out_of_range_fit_halts(tmp_path: Path, key: str, bad_value: float) -> None:
+    # REJECT-1 fix 1: NaN, Inf, negative probabilities, and impossible
+    # index values are not statistics — they halt typed, naming the field.
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(_result(dict(_good_fit(), **{key: bad_value})), tmp_path)
+    assert key in excinfo.value.message
+
+
+def test_rmsea_ci_out_of_order_halts(tmp_path: Path) -> None:
+    broken = dict(_good_fit(), rmsea_ci_lower=0.05, rmsea_ci_upper=0.01)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(_result(broken), tmp_path)
+    assert "rmsea_ci" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("est", float("inf")),
+        ("std", float("nan")),
+        ("se", -0.1),
+        ("se", float("nan")),
+        ("p", 1.5),
+        ("p", -0.2),
+    ],
+    ids=["est_inf", "std_nan", "se_negative", "se_nan", "p_above_one", "p_negative"],
+)
+def test_nonfinite_or_out_of_range_path_field_halts(
+    tmp_path: Path, field: str, bad_value: float
+) -> None:
+    result = _result()
+    result["paths"][0][field] = bad_value
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert field in excinfo.value.message
+
+
+def test_missing_requested_path_halts(tmp_path: Path) -> None:
+    # REJECT-1 fix 2: the worker must return exactly the regressions it
+    # was sent — a dropped pair halts, naming what is missing.
+    result = _result()
+    result["paths"] = result["paths"][:2]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "missing" in excinfo.value.message
+    assert excinfo.value.details["missing"] == [["F4", "F3"]]
+
+
+def test_extra_unrequested_path_halts(tmp_path: Path) -> None:
+    result = _result()
+    result["paths"].append(
+        {"lhs": "NOPE", "rhs": "FZ", "est": 0.1, "std": 0.1, "se": 0.1, "p": 0.5}
+    )
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "extra" in excinfo.value.message
+    assert excinfo.value.details["extra"] == [["NOPE", "FZ"]]
+
+
+def test_duplicate_path_halts(tmp_path: Path) -> None:
+    result = _result()
+    result["paths"].append(dict(result["paths"][0]))
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "duplicate" in excinfo.value.message
+
+
+def test_missing_r_squared_block_halts(tmp_path: Path) -> None:
+    # REJECT-1 fix 3 (FR-801): R² per endogenous construct is mandatory.
+    result = _result()
+    result.pop("r_squared")
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "r_squared" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [{"construct": "F3", "r2": 0.59}],
+        [
+            {"construct": "F3", "r2": 0.59},
+            {"construct": "F4", "r2": 0.35},
+            {"construct": "FZ", "r2": 0.1},
+        ],
+        [{"construct": "F3", "r2": 0.59}, {"construct": "F3", "r2": 0.59}],
+        [{"construct": "F3", "r2": 1.2}, {"construct": "F4", "r2": 0.35}],
+        [{"construct": "F3", "r2": float("nan")}, {"construct": "F4", "r2": 0.35}],
+        [{"construct": "F3", "r2": "high"}, {"construct": "F4", "r2": 0.35}],
+        [{"construct": "F3", "r2": -0.05}, {"construct": "F4", "r2": 0.35}],
+        ["not-a-mapping", {"construct": "F4", "r2": 0.35}],
+    ],
+    ids=[
+        "missing_endogenous",
+        "extra_construct",
+        "duplicate_construct",
+        "above_one",
+        "nan",
+        "nonnumeric",
+        "negative",
+        "nonmapping_entry",
+    ],
+)
+def test_malformed_r_squared_halts(tmp_path: Path, entries: list[Any]) -> None:
+    result = _result()
+    result["r_squared"] = entries
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "r_squared" in excinfo.value.message or "r2" in excinfo.value.message
+
+
 def test_nonnumeric_pvalue_halts(tmp_path: Path) -> None:
     with pytest.raises(IntegrityHalt) as excinfo:
         _run_with(_result(dict(_good_fit(), pvalue="small")), tmp_path)
@@ -295,7 +431,7 @@ def test_nonnumeric_path_p_halts(tmp_path: Path) -> None:
     result["paths"][0]["p"] = "tiny"
     with pytest.raises(IntegrityHalt) as excinfo:
         _run_with(result, tmp_path)
-    assert "nonnumeric p" in excinfo.value.message
+    assert "invalid p" in excinfo.value.message
 
 
 def test_missing_model_block_halts(tmp_path: Path) -> None:

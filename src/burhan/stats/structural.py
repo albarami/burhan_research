@@ -14,6 +14,7 @@ every worker result block is validated with typed halts.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard
@@ -31,19 +32,34 @@ if TYPE_CHECKING:
 _CFI_GOOD_RULE = re.compile(r">=\s*(\d\.\d+)\s+good")
 _RMSEA_GOOD_RULE = re.compile(r"<=\s*(\d\.\d+)\s+good")
 _BAND_CRITERIA = ("normed_chisq", "cfi_floor", "tli_floor", "rmsea_ceiling", "srmr_ceiling")
-_FIT_NUMERIC_KEYS = (
-    "chisq",
-    "cfi",
-    "tli",
-    "rmsea",
-    "rmsea_ci_lower",
-    "rmsea_ci_upper",
-    "srmr",
-)
+# Scientifically constrained ranges (None = unbounded on that side).
+# TLI is non-normed and legitimately falls outside [0, 1]; standardized
+# regression coefficients are not bounded by |1| (suppression), so both
+# are guarded for finiteness only.
+_FIT_RANGES: dict[str, tuple[float | None, float | None]] = {
+    "chisq": (0.0, None),
+    "cfi": (0.0, 1.0),
+    "tli": (None, None),
+    "rmsea": (0.0, None),
+    "rmsea_ci_lower": (0.0, None),
+    "rmsea_ci_upper": (0.0, None),
+    "srmr": (0.0, None),
+}
+_FIT_NUMERIC_KEYS = tuple(_FIT_RANGES)
 
 
 def _is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_finite(value: object) -> TypeGuard[int | float]:
+    return _is_number(value) and math.isfinite(value)
+
+
+def _in_range(value: float, low: float | None, high: float | None) -> bool:
+    if low is not None and value < low:
+        return False
+    return not (high is not None and value > high)
 
 
 def fit_bands(playbook: Playbook) -> dict[str, Any]:
@@ -215,13 +231,25 @@ def _validate_fit(block: object) -> dict[str, Any]:
             )
         )
     for key in _FIT_NUMERIC_KEYS:
-        if not _is_number(block.get(key)):
+        value = block.get(key)
+        low, high = _FIT_RANGES[key]
+        if not _is_finite(value) or not _in_range(float(value), low, high):
             halt(
                 IntegrityHalt(
-                    f"structural fit carries a nonnumeric {key}",
+                    f"structural fit carries an invalid {key}",
                     report={"field": key},
                 )
             )
+    if float(block["rmsea_ci_lower"]) > float(block["rmsea_ci_upper"]):
+        halt(
+            IntegrityHalt(
+                "structural fit rmsea_ci bounds are out of order",
+                report={
+                    "lower": float(block["rmsea_ci_lower"]),
+                    "upper": float(block["rmsea_ci_upper"]),
+                },
+            )
+        )
     p_value = block.get("pvalue")
     if p_value is None:
         if int(df) != 0:
@@ -231,10 +259,10 @@ def _validate_fit(block: object) -> dict[str, Any]:
                     report={"field": "pvalue", "df": int(df)},
                 )
             )
-    elif not _is_number(p_value):
+    elif not _is_finite(p_value) or not 0.0 <= p_value <= 1.0:
         halt(
             IntegrityHalt(
-                "structural fit carries a nonnumeric pvalue",
+                "structural fit carries an invalid pvalue",
                 report={"field": "pvalue"},
             )
         )
@@ -244,7 +272,7 @@ def _validate_fit(block: object) -> dict[str, Any]:
     return validated
 
 
-def _validate_paths(block: object) -> list[dict[str, Any]]:
+def _validate_paths(block: object, *, expected: list[tuple[str, str]]) -> list[dict[str, Any]]:
     if not isinstance(block, list):
         halt(
             IntegrityHalt(
@@ -253,6 +281,7 @@ def _validate_paths(block: object) -> list[dict[str, Any]]:
             )
         )
     validated: list[dict[str, Any]] = []
+    returned: list[tuple[str, str]] = []
     for entry in block:
         if not isinstance(entry, Mapping) or not all(
             isinstance(entry.get(key), str) for key in ("lhs", "rhs")
@@ -263,24 +292,103 @@ def _validate_paths(block: object) -> list[dict[str, Any]]:
                     report={"block": "paths"},
                 )
             )
-        for key in ("est", "std", "se"):
-            if not _is_number(entry.get(key)):
+        for key in ("est", "std"):
+            if not _is_finite(entry.get(key)):
                 halt(
                     IntegrityHalt(
-                        f"structural paths entry carries a nonnumeric {key}",
+                        f"structural paths entry carries an invalid {key}",
                         report={"lhs": str(entry["lhs"]), "rhs": str(entry["rhs"])},
                     )
                 )
-        p_value = entry.get("p")
-        if p_value is not None and not _is_number(p_value):
+        se = entry.get("se")
+        if not _is_finite(se) or se < 0.0:
             halt(
                 IntegrityHalt(
-                    "structural paths entry carries a nonnumeric p",
+                    "structural paths entry carries an invalid se",
                     report={"lhs": str(entry["lhs"]), "rhs": str(entry["rhs"])},
                 )
             )
+        p_value = entry.get("p")
+        if p_value is not None and (not _is_finite(p_value) or not 0.0 <= p_value <= 1.0):
+            halt(
+                IntegrityHalt(
+                    "structural paths entry carries an invalid p",
+                    report={"lhs": str(entry["lhs"]), "rhs": str(entry["rhs"])},
+                )
+            )
+        pair = (str(entry["lhs"]), str(entry["rhs"]))
+        if pair in returned:
+            halt(
+                IntegrityHalt(
+                    "structural paths carry duplicate pairs",
+                    report={"duplicate": list(pair)},
+                )
+            )
+        returned.append(pair)
         validated.append(dict(entry))
+    missing = sorted(set(expected) - set(returned))
+    if missing:
+        halt(
+            IntegrityHalt(
+                "structural paths are missing requested pairs",
+                report={"missing": [list(pair) for pair in missing]},
+            )
+        )
+    extra = sorted(set(returned) - set(expected))
+    if extra:
+        halt(
+            IntegrityHalt(
+                "structural paths carry extra unrequested pairs",
+                report={"extra": [list(pair) for pair in extra]},
+            )
+        )
     return validated
+
+
+def _validate_r_squared(block: object, *, endogenous: list[str]) -> list[dict[str, Any]]:
+    if not isinstance(block, list):
+        halt(
+            IntegrityHalt(
+                "structural worker result lacks an r_squared block",
+                report={"block": "r_squared"},
+            )
+        )
+    validated: dict[str, float] = {}
+    for entry in block:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("construct"), str):
+            halt(
+                IntegrityHalt(
+                    "structural r_squared entry is malformed",
+                    report={"block": "r_squared"},
+                )
+            )
+        construct = str(entry["construct"])
+        r2 = entry.get("r2")
+        if not _is_finite(r2) or not 0.0 <= r2 <= 1.0:
+            halt(
+                IntegrityHalt(
+                    "structural r_squared value is invalid",
+                    report={"construct": construct, "field": "r2"},
+                )
+            )
+        if construct in validated:
+            halt(
+                IntegrityHalt(
+                    "structural r_squared carries a duplicate construct",
+                    report={"construct": construct},
+                )
+            )
+        validated[construct] = float(r2)
+    missing = sorted(set(endogenous) - set(validated))
+    extra = sorted(set(validated) - set(endogenous))
+    if missing or extra:
+        halt(
+            IntegrityHalt(
+                "structural r_squared does not cover exactly the endogenous constructs",
+                report={"missing": missing, "extra": extra},
+            )
+        )
+    return [{"construct": construct, "r2": validated[construct]} for construct in sorted(validated)]
 
 
 def _validate_model(block: object) -> dict[str, Any]:
@@ -340,9 +448,17 @@ def run_structural(
                 },
             )
         )
+    expected_pairs = [
+        (str(regression["lhs"]), str(regression["rhs"])) for regression in payload["regressions"]
+    ]
+    endogenous: list[str] = []
+    for lhs, _ in expected_pairs:
+        if lhs not in endogenous:
+            endogenous.append(lhs)
     fit = _validate_fit(result.get("fit"))
-    paths = _validate_paths(result.get("paths"))
+    paths = _validate_paths(result.get("paths"), expected=expected_pairs)
     model = _validate_model(result.get("model"))
+    r_squared = _validate_r_squared(result.get("r_squared"), endogenous=endogenous)
     carrier_block: dict[str, Any] | None = None
     if config.higher_order is not None:
         carry = str(config.higher_order.structural_carry)
@@ -361,5 +477,6 @@ def run_structural(
         "model": model,
         "fit": fit,
         "paths": paths,
+        "r_squared": r_squared,
         "band_evaluation": evaluate_fit_bands(fit, bands=bands),
     }

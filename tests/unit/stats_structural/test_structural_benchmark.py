@@ -30,6 +30,12 @@ PUBLISHED_FIT = {
 }
 PUBLISHED_PATHS = {("F3", "F1"): 0.563, ("F3", "F2"): 0.790, ("F4", "F3"): 0.473}
 
+# FR-801 R² reference: the ex5.11 output page prints no R-SQUARE section,
+# so the reference is the renv-locked lavaan 0.6-21 itself (captured
+# 2026-07-04 on the verified fit; PROVENANCE.md) — pinned at 3 decimals,
+# the same cross-host-stable precision as the printed values.
+LAVAAN_R_SQUARED = {"F3": 0.595, "F4": 0.354}
+
 
 def _run(tmp_path: Path) -> dict:
     return run_structural(
@@ -74,6 +80,16 @@ def test_band_evaluation_recorded_as_report(tmp_path: Path) -> None:
     }
     for entry in evaluation["entries"]:
         assert set(entry) >= {"criterion", "observed", "threshold", "verdict"}
+
+
+def test_r_squared_reported_per_endogenous_construct(tmp_path: Path) -> None:
+    # FR-801: R² for every endogenous construct, matched to the lavaan
+    # reference within printed precision.
+    report = _run(tmp_path)
+    r_squared = {entry["construct"]: entry["r2"] for entry in report["r_squared"]}
+    assert set(r_squared) == set(LAVAAN_R_SQUARED)
+    for construct, reference in LAVAAN_R_SQUARED.items():
+        assert round(r_squared[construct], 3) == reference, construct
 
 
 def test_no_higher_order_means_no_carrier_block(tmp_path: Path) -> None:

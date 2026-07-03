@@ -14,7 +14,8 @@
 #   path model over the score columns.
 #
 # Fit is REPORTED only: nothing in this worker consults a fit result to
-# change the model (PB-15 failure_action = report). Malformed inputs and
+# change the model (PB-15 failure_action = report). R-squared is emitted
+# for every regression target (FR-801). Malformed inputs and
 # non-converged fits abort loudly.
 
 .structural_data <- function(payload) {
@@ -75,6 +76,15 @@
     rmsea_ci_upper = as.numeric(measures[["rmsea.ci.upper"]]),
     srmr = as.numeric(measures[["srmr"]])
   )
+}
+
+.r_squared_rows <- function(fit, regressions) {
+  r2 <- lavaan::lavInspect(fit, "rsquare")
+  targets <- unique(vapply(regressions, function(r) r$lhs, character(1L)))
+  stopifnot(all(targets %in% names(r2)))
+  lapply(targets, function(code) {
+    list(construct = code, r2 = as.numeric(r2[[code]]))
+  })
 }
 
 .path_rows <- function(fit) {
@@ -143,6 +153,7 @@ run_worker <- function(payload) {
       nfree = as.integer(lavaan::lavInspect(fit, "npar"))
     ),
     fit = .fit_block(fit),
-    paths = .path_rows(fit)
+    paths = .path_rows(fit),
+    r_squared = .r_squared_rows(fit, regressions)
   )
 }
