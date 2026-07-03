@@ -44,9 +44,7 @@ def test_missing_univariate_bands_criterion_halts() -> None:
 
 
 def test_constant_column_halts_univariate_moments() -> None:
-    playbook = Playbook.load(
-        REPO / "playbooks" / "CB_SEM_PLAYBOOK_v1.0.yaml", mode="certification"
-    )
+    playbook = Playbook.load(REPO / "playbooks" / "CB_SEM_PLAYBOOK_v1.0.yaml", mode="certification")
     with pytest.raises(IntegrityHalt):
         univariate_moments(pd.DataFrame({"flat": [4.0] * 10}), playbook=playbook)
 
@@ -63,9 +61,7 @@ def test_singular_covariance_halts_mardia() -> None:
 def test_mahalanobis_feed_needs_more_cases_than_variables() -> None:
     from burhan.core.policy import Policy
 
-    policy = Policy.load(
-        REPO / "policy" / "decision_policy.template.yaml", mode="certification"
-    )
+    policy = Policy.load(REPO / "policy" / "decision_policy.template.yaml", mode="certification")
     frame = pd.DataFrame(np.eye(3), columns=["a", "b", "c"])
     with pytest.raises(IntegrityHalt):
         mahalanobis_feed(frame, policy=policy)
