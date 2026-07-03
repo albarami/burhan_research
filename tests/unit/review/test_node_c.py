@@ -129,6 +129,23 @@ def test_gate2_approves_a_complete_supported_draft() -> None:
     assert verdict.verdict == "approve"
 
 
+def test_gate2_store_fixture_rows_validate_against_the_governed_schema() -> None:
+    # REJECT-TC07 round 2: FR-302 evidence must BE results-store rows — every
+    # emitted fixture row validates against results_store.schema.json.
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads(
+        (REPO / "schemas" / "results_store.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    rows = [json.loads(line) for line in results_store_text().splitlines()]
+    assert len(rows) == 3  # H1, H4a, H4b — the FR-302 evidence base
+    for row in rows:
+        validator.validate(row)
+
+
 def test_bad_draft_prompt_carries_h4b_evidence_outside_the_draft() -> None:  # REJECT-TC07 fix 1
     # The omission defect must be provable from the artifacts Node C reviews:
     # the draft never names H4b, while the store's authoritative row and the
