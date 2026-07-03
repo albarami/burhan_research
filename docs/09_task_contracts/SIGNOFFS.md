@@ -16,6 +16,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 | TC-06 | 5b9e48a | 2026-07-02 | APPROVE | Node A contract accepted; typed llm.yaml validation, dictionary polarity, and all gates green. |
 | TC-07 | 3e05188 | 2026-07-03 | APPROVE | Node C gates accepted; schema-valid Gate 2 evidence, strict duplicate-key/blank-fix verdicts, bounded retry loop, all gates green. |
 | TC-08a | 5b35d12 | 2026-07-03 | APPROVE | Python prep accepted; policy-driven screening, exact case-level N-chain (same-link double-counts halt), seven invariants, golden core, all gates green. |
+| TC-08b | 2e57a1f | 2026-07-03 | APPROVE | R prep + reconciler accepted; live cell-for-cell parity at tolerance 0, typed divergence halts naming row/column, lintr clean, all gates green. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
