@@ -93,6 +93,23 @@ def test_discrepancy_report_carries_no_respondent_values(golden_python: Any) -> 
     assert set(details) <= {"row", "column", "kind"}  # metadata only, never values
 
 
+def test_nonnumeric_r_cell_halts_typed_naming_row_and_column(
+    golden_python: Any,
+) -> None:  # REJECT-TC08b fix: raw ValueError probe ('not-a-number')
+    _, _, result = golden_python
+    doctored = _r_result_from(result)
+    row_index, column_index = 3, 5
+    doctored["cells"][row_index][column_index] = "not-a-number"
+    with pytest.raises(VerificationHalt) as excinfo:  # typed, never ValueError
+        reconcile_prep(result, doctored, policy=_policy())
+    assert excinfo.value.run_state == "HALTED_VERIFICATION"
+    details = excinfo.value.to_report()["details"]
+    assert details["row"] == str(result.frame.index[row_index])
+    assert details["column"] == str(result.frame.columns[column_index])
+    assert set(details) <= {"kind", "row", "column"}  # metadata only
+    assert "not-a-number" not in str(details)
+
+
 def test_nan_versus_value_divergence_halts(golden_python: Any) -> None:  # AT-M08-6
     _, _, result = golden_python
     doctored = _r_result_from(result)

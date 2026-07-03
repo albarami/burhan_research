@@ -132,6 +132,13 @@ def reconcile_prep(
                         report={"kind": "cell", "row": case, "column": column},
                     )
                 )
+            if isinstance(r_value, bool) or not isinstance(r_value, int | float):
+                halt(
+                    VerificationHalt(
+                        "dual-path preparation discrepancy (FR-501): malformed non-numeric R cell",
+                        report={"kind": "cell", "row": case, "column": column},
+                    )
+                )
             if abs(float(py_value) - float(r_value)) > tolerance:
                 halt(
                     VerificationHalt(
