@@ -30,13 +30,24 @@ jobs:
       - name: sync locked environment
         run: uv sync --frozen
       - uses: r-lib/actions/setup-r@v2
-        with: { r-version: "4.5.2", use-public-rspm: true }
+        # No RSPM: prebuilt binaries are rebuilt over time and shift
+        # floating-point results between runs; certification pins need a
+        # source-built stack at the locked versions (04 §7), mirroring the
+        # workstation. The renv cache below amortizes the compile per
+        # renv.lock hash.
+        with: { r-version: "4.5.2", use-public-rspm: false }
       - name: system libraries for the governed R stack
         # mirrors the researcher workstation (E-R3): MVN/car closures load
         # GSL, curl, and nlopt shared libraries at runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libgsl-dev libnlopt-dev cmake
+      - uses: actions/cache@v4
+        with:
+          path: |
+            workers/r/renv/library
+            ~/.cache/R/renv
+          key: renv-source-${{ hashFiles('workers/r/renv.lock') }}
       - name: restore renv-locked R packages
         working-directory: workers/r
         run: |
