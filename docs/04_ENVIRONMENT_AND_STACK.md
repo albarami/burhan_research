@@ -56,7 +56,7 @@ Single-threaded BLAS is deliberate: multithreaded reductions are a classic sourc
   - Estimation: `lavaan` (≥ 0.6-19), `semTools`, `simsem`
   - Diagnostics: `psych`, `MVN` (Mardia), `car` (VIF)
   - Missing data: `mice` (MI alternative; FIML is lavaan-native)
-  - Interop: `jsonlite`, `arrow`
+  - Interop: `jsonlite`; `arrow` (deferred until a contract requires parquet interop — researcher deferral, 2026-07-03)
 - **System libraries (apt):** `build-essential gfortran libcurl4-openssl-dev libssl-dev libxml2-dev libblas-dev liblapack-dev libarrow-dev`.
 
 ## 5. LLM Provider Configuration (per node)
@@ -110,6 +110,8 @@ API keys via environment variables only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`),
 | Locale / TZ | `C.UTF-8` / `UTC` | NFR-101 |
 | Env integrity | `uv.lock` + `renv.lock` hashes asserted at startup and recorded | NFR-102 |
 | Parallelism | derived-seed workers only where certification proves bit-stability; else serial | AD-07 |
+
+Certified pinned statistical outputs (known-answer seeds for optimizer-based simulations) are recorded **per certified environment** — the reference workstation and the CI regression runner — because bit-reproducibility (NFR-101) holds within an environment, not across differently built BLAS/linear-algebra binaries; cross-environment agreement is governed by the certified tolerance regime (FR-902), never bitwise equality. Platform-keyed pins in certification tests are sanctioned accordingly.
 
 ## 8. Bootstrap Procedure (one-time)
 
