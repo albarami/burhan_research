@@ -56,7 +56,7 @@ Single-threaded BLAS is deliberate: multithreaded reductions are a classic sourc
   - Estimation: `lavaan` (≥ 0.6-19), `semTools`, `simsem`
   - Diagnostics: `psych`, `MVN` (Mardia), `car` (VIF)
   - Missing data: `mice` (MI alternative; FIML is lavaan-native)
-  - Interop: `jsonlite`, `arrow`
+  - Interop: `jsonlite`; `arrow` (deferred until a contract requires parquet interop — researcher deferral, 2026-07-03)
 - **System libraries (apt):** `build-essential gfortran libcurl4-openssl-dev libssl-dev libxml2-dev libblas-dev liblapack-dev libarrow-dev`.
 
 ## 5. LLM Provider Configuration (per node)
