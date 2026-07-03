@@ -33,6 +33,7 @@ def _two_construct_frame(
     latent_corr: float,
     loading: float,
     method_loading: float = 0.0,
+    markers: bool = False,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     noise_sd = float(np.sqrt(max(1.0 - loading**2 - method_loading**2, 0.01)))
@@ -50,6 +51,12 @@ def _two_construct_frame(
         columns[item] = (
             loading * factor_b + method_loading * method + noise_sd * rng.normal(0.0, 1.0, n)
         )
+    if markers:
+        # method-only marker items (Williams et al. 2010): they anchor CLF
+        # identification, carrying method variance and no trait variance
+        marker_noise = float(np.sqrt(1.0 - 0.8**2))
+        for marker in ("M1", "M2"):
+            columns[marker] = 0.8 * method + marker_noise * rng.normal(0.0, 1.0, n)
     frame = pd.DataFrame(columns)
     frame.index = pd.Index([f"R_{i:04d}" for i in range(1, n + 1)], name="case")
     return frame
@@ -70,6 +77,7 @@ def cmb_frame(seed: int = 29, *, with_method: bool = True) -> pd.DataFrame:
         latent_corr=0.45,
         loading=0.45,
         method_loading=0.75 if with_method else 0.0,
+        markers=True,
     )
 
 

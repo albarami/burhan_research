@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from burhan.stats.measurement import measurement_bands, run_measurement
 from measurement_util import trap_frame, two_construct_config, validity_frame
 
 from burhan.core.artifacts.loader import validate_and_build
@@ -28,6 +27,7 @@ from burhan.core.errors import IntegrityHalt
 from burhan.core.playbook import Playbook
 from burhan.core.policy import Policy
 from burhan.core.rworker import RWorker
+from burhan.stats.measurement import measurement_bands, run_measurement
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -125,8 +125,12 @@ def test_loading_band_evaluation_per_pb09(tmp_path: Path) -> None:
     for entry in report["first_order"]["loadings"]:
         assert "std" in entry and "p" in entry
         assert entry["band"] in {"target", "borderline", "deletion_candidate"}
-    # fixture loadings ≈ .75 standardized: all at target
-    assert all(e["band"] == "target" for e in report["first_order"]["loadings"])
+    # the deterministic fixture's exact truth: seven loadings at target and
+    # B4 (std = .7053) in the .70–.708 borderline band — the PB-09
+    # borderline rule exercised on real data, not a synthetic edge
+    bands = {(e["construct"], e["item"]): e["band"] for e in report["first_order"]["loadings"]}
+    assert bands[("FB", "B4")] == "borderline"
+    assert sum(1 for band in bands.values() if band == "target") == 7
 
 
 def test_malformed_reliability_block_halts_typed(tmp_path: Path) -> None:

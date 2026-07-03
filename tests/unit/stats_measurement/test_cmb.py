@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from burhan.stats.measurement import evaluate_cmb, run_cmb
 from measurement_util import cmb_frame, two_construct_config
 
 from burhan.core.artifacts.loader import validate_and_build
@@ -25,6 +24,7 @@ from burhan.core.errors import IntegrityHalt
 from burhan.core.playbook import Playbook
 from burhan.core.policy import Policy
 from burhan.core.rworker import RWorker
+from burhan.stats.measurement import evaluate_cmb, run_cmb
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -50,6 +50,7 @@ def _run_cmb(with_method: bool, tmp_path: Path, call_id: str) -> dict[str, Any]:
         rworker=RWorker(),
         run_dir=tmp_path,
         call_id=call_id,
+        marker_items=["M1", "M2"],  # method-only markers anchor the CLF
     )
 
 
@@ -120,5 +121,21 @@ def test_missing_worker_cmb_block_halts_typed(tmp_path: Path) -> None:  # AT-M10
             rworker=HollowWorker(),  # type: ignore[arg-type]
             run_dir=tmp_path,
             call_id="cmb-hollow",
+            marker_items=["M1", "M2"],
         )
     assert "clf" in excinfo.value.message
+
+
+def test_missing_marker_columns_halt_typed(tmp_path: Path) -> None:
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_cmb(
+            cmb_frame(with_method=False),
+            _config(),
+            policy=_policy(),
+            playbook=_playbook(),
+            rworker=RWorker(),
+            run_dir=tmp_path,
+            call_id="cmb-nomarker",
+            marker_items=["GHOST_MARKER"],
+        )
+    assert "marker" in excinfo.value.message
