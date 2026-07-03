@@ -11,11 +11,12 @@
 #   {latent_correlations, htmt}. Two-stage: stage 1 is the correlated
 #   first-order CFA; stage 2 fits the higher-order factor on lavPredict
 #   factor scores.
-#   Level-2 reliability is McDonald-omega at level 2 from the
-#   standardized solution: cr_l2 = (sum lambda2)^2 / ((sum lambda2)^2 +
-#   sum psi) over components; omega_l1 = the share of total-composite
-#   variance carried by the L2 factor, (sum_i lambda1_i lambda2_c(i))^2
-#   over the model-implied total-score variance.
+#   Level-2 reliability for the repeated-indicator fit comes from the
+#   reference implementation semTools::reliabilityL2 (renv-locked):
+#   cr_l2 = omegaL2 (reliability of the first-order-factor composite as
+#   a measure of the L2 factor), omega_l1 = omegaL1 (share of the total
+#   item-composite variance carried by the L2 factor). The AT-M10-1
+#   benchmark pins both against captured semTools values.
 #
 # - cmb: same data payload. Harman screen: first principal component's
 #   share of total standardized variance (Podsakoff et al. 2003
@@ -104,26 +105,13 @@
   )
 }
 
-.level2_reliability <- function(fit, so_code, components) {
-  std <- lavaan::standardizedSolution(fit)
-  lambda2 <- std[std$op == "=~" & std$lhs == so_code, ]
-  psi <- std[std$op == "~~" & std$lhs %in% components &
-               std$lhs == std$rhs, ]
-  l2 <- lambda2$est.std
-  d2 <- psi$est.std
-  cr_l2 <- sum(l2)^2 / (sum(l2)^2 + sum(d2))
-  first <- std[std$op == "=~" & std$lhs %in% components, ]
-  numerator <- 0
-  total_true <- 0
-  for (component in components) {
-    l1 <- first[first$lhs == component, "est.std"]
-    l2c <- lambda2[lambda2$rhs == component, "est.std"]
-    numerator <- numerator + sum(l1) * l2c
-    total_true <- total_true + sum(l1)^2 * d2[which(components == component)]
-  }
-  residuals <- std[std$op == "~~" & std$lhs == std$rhs &
-                     !(std$lhs %in% c(components, so_code)), "est.std"]
-  omega_l1 <- numerator^2 / (numerator^2 + total_true + sum(residuals))
+.level2_reliability <- function(fit, so_code) {
+  # Reference implementation (deprecated upstream, stable in the
+  # renv-locked semTools; suppressed warning is the deprecation notice).
+  values <- suppressWarnings(semTools::reliabilityL2(fit, so_code))
+  omega_l1 <- as.numeric(values[["omegaL1"]])
+  cr_l2 <- as.numeric(values[["omegaL2"]])
+  stopifnot(is.finite(omega_l1), is.finite(cr_l2))
   list(construct = so_code, cr_l2 = cr_l2, omega_l1 = omega_l1)
 }
 
@@ -204,7 +192,7 @@ run_worker <- function(payload) {
         ),
         second_order = list(
           loadings = .loading_rows(fit, so_code, "construct", "component"),
-          reliability = .level2_reliability(fit, so_code, components),
+          reliability = .level2_reliability(fit, so_code),
           stage = 1L
         ),
         fit = .fit_block(fit),

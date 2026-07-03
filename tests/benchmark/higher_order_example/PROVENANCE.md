@@ -22,9 +22,34 @@ Guide* (8th ed.), Example 5.6 — "CFA with a second-order factor".
 | f5 =~ f2 | 0.944 | f5 =~ f3 | 1.168 |
 | f5 =~ f4 | 0.854 | χ² (df=50) | 46.743 |
 
-**Cross-engine reproduction (FR-1502):** lavaan 0.6-20 (renv-locked)
+**Cross-engine reproduction (FR-1502):** lavaan 0.6-21 (renv-locked)
 reproduces every printed value to the printed precision (verified
-2026-07-03 before the benchmark tests were written). α/CR/AVE reference
-values for both levels come from `semTools` (renv-locked version) on the
-same fit — the same reference-implementation pattern AT-M10-2 mandates
-for HTMT and Fornell–Larcker.
+2026-07-03 before the benchmark tests were written).
+
+## Reliability reference values (semTools, renv-locked)
+
+Captured 2026-07-03 with `semTools` **0.5-8** / `lavaan` **0.6-21** (the
+renv-locked stack) on the fits the worker computes for this data — the
+same reference-implementation pattern AT-M10-2 mandates for HTMT and
+Fornell–Larcker. The AT-M10-1 benchmark asserts every value below within
+**±1e-4** (`RELIABILITY_TOLERANCE` in `test_higher_order_benchmark.py`).
+
+**First-order (correlated four-factor CFA, `std.lv = TRUE`):**
+`compRelSEM` (CR), `compRelSEM(tau.eq = TRUE)` (α), `AVE`.
+
+| Construct | α | CR | AVE |
+|---|---|---|---|
+| F1 | 0.885217 | 0.898142 | 0.752108 |
+| F2 | 0.885369 | 0.898198 | 0.751544 |
+| F3 | 0.903026 | 0.917772 | 0.793400 |
+| F4 | 0.890386 | 0.904605 | 0.764981 |
+
+**Second-order (repeated-indicator fit, marker scaling):**
+`reliabilityL2(fit, "F5")` — deprecated upstream but stable in the
+locked 0.5-8; the worker calls it directly, so the pins bind the
+reference implementation, not a reimplementation.
+
+| Quantity | semTools name | Reference |
+|---|---|---|
+| `omega_l1` | omegaL1 | 0.604452 |
+| `cr_l2` | omegaL2 | 0.637787 |

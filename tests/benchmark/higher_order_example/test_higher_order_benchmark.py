@@ -41,6 +41,20 @@ PUBLISHED_SECOND_ORDER = {("F5", "F2"): 0.944, ("F5", "F3"): 1.168, ("F5", "F4")
 PUBLISHED_CHISQ = 46.743
 PUBLISHED_DF = 50
 
+# Reliability reference values (PROVENANCE.md): renv-locked semTools 0.5-8 /
+# lavaan 0.6-21 on the same fits the worker computes — compRelSEM (CR),
+# compRelSEM(tau.eq = TRUE) (alpha) and AVE on the correlated first-order
+# CFA; reliabilityL2 omegaL1/omegaL2 on the second-order fit. Captured
+# 2026-07-03; tolerance 1e-4 (matches the AT-M10-2 parity tolerance).
+SEMTOOLS_FIRST_ORDER_RELIABILITY = {
+    "F1": {"alpha": 0.885217, "cr": 0.898142, "ave": 0.752108},
+    "F2": {"alpha": 0.885369, "cr": 0.898198, "ave": 0.751544},
+    "F3": {"alpha": 0.903026, "cr": 0.917772, "ave": 0.793400},
+    "F4": {"alpha": 0.890386, "cr": 0.904605, "ave": 0.764981},
+}
+SEMTOOLS_SECOND_ORDER_RELIABILITY = {"omega_l1": 0.604452, "cr_l2": 0.637787}
+RELIABILITY_TOLERANCE = 1e-4
+
 
 def _frame() -> pd.DataFrame:
     frame = pd.read_csv(
@@ -142,19 +156,26 @@ def test_repeated_indicator_reproduces_published_anchors(tmp_path: Path) -> None
 
 
 def test_repeated_indicator_reports_reliability_at_both_levels(tmp_path: Path) -> None:
-    # AT-M10-1: both-level reporting (FR-702). alpha/CR/AVE per first-order
-    # construct plus second-order (L2) reliability, references from the
-    # renv-locked semTools on this fit.
+    # AT-M10-1: both-level reporting (FR-702), every value pinned to the
+    # renv-locked semTools reference implementation within tolerance
+    # (constants above; capture record in PROVENANCE.md).
     report = _run("repeated_indicator", tmp_path, "bench-ri-rel")
-    first = report["first_order"]["reliability"]
-    assert {entry["construct"] for entry in first} == {"F1", "F2", "F3", "F4"}
-    for entry in first:
-        for key in ("alpha", "cr", "ave"):
-            assert 0.0 < entry[key] < 1.0
+    first = {entry["construct"]: entry for entry in report["first_order"]["reliability"]}
+    assert set(first) == set(SEMTOOLS_FIRST_ORDER_RELIABILITY)
+    for construct, expected in SEMTOOLS_FIRST_ORDER_RELIABILITY.items():
+        for key, reference in expected.items():
+            assert first[construct][key] == pytest.approx(reference, abs=RELIABILITY_TOLERANCE), (
+                construct,
+                key,
+            )
     second = report["second_order"]["reliability"]
     assert second["construct"] == "F5"
-    assert 0.0 < second["cr_l2"] < 1.0
-    assert 0.0 < second["omega_l1"] < 1.0
+    assert second["cr_l2"] == pytest.approx(
+        SEMTOOLS_SECOND_ORDER_RELIABILITY["cr_l2"], abs=RELIABILITY_TOLERANCE
+    )
+    assert second["omega_l1"] == pytest.approx(
+        SEMTOOLS_SECOND_ORDER_RELIABILITY["omega_l1"], abs=RELIABILITY_TOLERANCE
+    )
 
 
 def test_two_stage_reports_both_levels_on_the_same_data(tmp_path: Path) -> None:  # AT-M10-1
