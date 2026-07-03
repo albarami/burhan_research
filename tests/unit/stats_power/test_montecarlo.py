@@ -211,14 +211,16 @@ def test_identical_seeds_produce_identical_power(tmp_path: Path) -> None:  # AT-
     assert first["converged"] == second["converged"]
 
 
-def test_different_seeds_may_differ_and_power_is_probability(tmp_path: Path) -> None:
-    first = _run_montecarlo(tmp_path, 11, "mc-c")
-    third = _run_montecarlo(tmp_path, 12, "mc-d")
-    powers = first["power"]
-    assert set(powers) == {"CUL~RES", "INT~CUL"}  # type: ignore[arg-type]
-    for value in powers.values():  # type: ignore[union-attr]
-        assert 0.0 <= value <= 1.0
-    assert third["power"] != first["power"]  # 40 reps: ties are vanishingly unlikely
+def test_pinned_seeds_reproduce_fixed_expected_outputs(tmp_path: Path) -> None:
+    # Fixed expected outputs under the locked R environment (renv.lock):
+    # captured once from the governed stack and pinned — any drift in
+    # packages, model syntax, or seeding breaks these exact values.
+    eleven = _run_montecarlo(tmp_path, 11, "mc-pin11")
+    assert eleven["power"] == {"CUL~RES": 0.925, "INT~CUL": 0.95}
+    assert eleven["converged"] == 40
+    twelve = _run_montecarlo(tmp_path, 12, "mc-pin12")
+    assert twelve["power"] == {"CUL~RES": 0.925, "INT~CUL": 0.85}
+    assert twelve["converged"] == 40
 
 
 def test_replications_default_from_policy(tmp_path: Path) -> None:

@@ -64,10 +64,19 @@ run_worker <- function(payload) {
     selected <- match(focal, power_names)
     stopifnot(!anyNA(selected))
     power <- as.list(stats::setNames(power_values[selected], focal))
-    converged <- tryCatch(
-      sum(output@converged == 0L),
-      error = function(condition) replications
-    )
+    # No catch-and-continue (standards: guarded statistical layers): the
+    # convergence vector must exist and be well-formed, else abort loudly
+    # so the harness raises a typed halt.
+    convergence_codes <- methods::slot(output, "converged")
+    if (!is.numeric(convergence_codes) ||
+          length(convergence_codes) != replications) {
+      stop(
+        "power_worker: simsem output lacks a valid converged vector (",
+        "length ", length(convergence_codes), " for ", replications,
+        " replications)"
+      )
+    }
+    converged <- sum(convergence_codes == 0L)
     return(list(power = power, converged = converged))
   }
   stop("power_worker: unimplemented op '", op, "'")

@@ -2,9 +2,10 @@
 
 The R side implements the same published formulas independently; parity
 with the Python path at tight tolerance is the FR-501-style independence
-evidence for this stage. The Monte Carlo op is deliberately absent
-pending the governed R stack (escalation E-R3) — calling it halts typed,
-never fabricates.
+evidence for this stage. The worker's ops are ``close_fit`` and
+``montecarlo`` (simsem over the renv-locked stack; E-R3 resolved
+2026-07-03, exercised in test_montecarlo.py) — any unknown op aborts the
+worker and surfaces as a typed halt.
 """
 
 from __future__ import annotations
