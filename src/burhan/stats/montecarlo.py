@@ -273,7 +273,30 @@ def montecarlo_power(
         run_dir=run_dir,
         seed=seed,
     )
-    power = {str(k): float(v) for k, v in dict(result["power"]).items()}
+    # No catch-and-continue, no raw dereference: the worker's power block
+    # must exist, be a mapping, and carry a real number per focal path
+    # (standards §4).
+    raw_power = result.get("power")
+    if not isinstance(raw_power, dict):
+        halt(
+            IntegrityHalt(
+                "Monte Carlo result carries a missing or non-mapping power block",
+                report={"power_type": type(raw_power).__name__},
+            )
+        )
+    malformed = sorted(
+        str(path)
+        for path, value in raw_power.items()
+        if isinstance(value, bool) or not isinstance(value, int | float)
+    )
+    if malformed:
+        halt(
+            IntegrityHalt(
+                "Monte Carlo result carries nonnumeric power values",
+                report={"paths": malformed},
+            )
+        )
+    power = {str(path): float(value) for path, value in raw_power.items()}
     missing = sorted(set(syntaxes["focal_paths"]) - set(power))
     if missing:
         halt(

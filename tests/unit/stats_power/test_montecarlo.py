@@ -204,6 +204,35 @@ def test_malformed_converged_halts_typed(
     assert "converged" in excinfo.value.message
 
 
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"converged": 40},  # power absent entirely (reviewer probe: raw KeyError)
+        {"power": ["CUL~RES", 0.9], "converged": 40},  # not a mapping
+        {"power": "high", "converged": 40},  # not a mapping either
+        {"power": {"CUL~RES": "strong", "INT~CUL": 0.9}, "converged": 40},  # nonnumeric
+        {"power": {"CUL~RES": None, "INT~CUL": 0.9}, "converged": 40},  # null value
+        {"power": {"CUL~RES": True, "INT~CUL": 0.9}, "converged": 40},  # bool value
+    ],
+)
+def test_malformed_power_halts_typed(
+    tmp_path: Path, result: dict[str, object]
+) -> None:  # REJECT-TC09 round 4: raw KeyError/TypeError probes
+    with pytest.raises(IntegrityHalt) as excinfo:  # typed, never KeyError
+        montecarlo_power(
+            _golden_config(),
+            n=200,
+            seed=1,
+            policy=_policy(),
+            playbook=_playbook(),
+            rworker=_CannedWorker(result),  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id="mc-power-shape",
+            replications=40,
+        )
+    assert "power" in excinfo.value.message
+
+
 def test_missing_focal_power_in_result_halts(tmp_path: Path) -> None:
     class HollowWorker:
         @staticmethod
