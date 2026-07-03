@@ -111,6 +111,8 @@ API keys via environment variables only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`),
 | Env integrity | `uv.lock` + `renv.lock` hashes asserted at startup and recorded | NFR-102 |
 | Parallelism | derived-seed workers only where certification proves bit-stability; else serial | AD-07 |
 
+Certified pinned statistical outputs (known-answer seeds for optimizer-based simulations) are recorded **per certified environment** — the reference workstation and the CI regression runner — because bit-reproducibility (NFR-101) holds within an environment, not across differently built BLAS/linear-algebra binaries; cross-environment agreement is governed by the certified tolerance regime (FR-902), never bitwise equality. Platform-keyed pins in certification tests are sanctioned accordingly.
+
 ## 8. Bootstrap Procedure (one-time)
 
 ```bash
