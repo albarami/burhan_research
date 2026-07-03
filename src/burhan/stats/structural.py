@@ -223,7 +223,7 @@ def _validate_fit(block: object) -> dict[str, Any]:
             )
         )
     df = block.get("df")
-    if not _is_number(df) or int(df) != df or int(df) < 0:
+    if not _is_finite(df) or int(df) != df or int(df) < 0:
         halt(
             IntegrityHalt(
                 "structural fit df is not a non-negative integer",
@@ -408,7 +408,7 @@ def _validate_model(block: object) -> dict[str, Any]:
             )
         )
     nfree = block.get("nfree")
-    if not _is_number(nfree) or int(nfree) != nfree or int(nfree) <= 0:
+    if not _is_finite(nfree) or int(nfree) != nfree or int(nfree) <= 0:
         halt(
             IntegrityHalt(
                 "structural model nfree is not a positive integer",

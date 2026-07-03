@@ -136,6 +136,24 @@ def test_fractional_df_halts(tmp_path: Path) -> None:
     assert "df" in excinfo.value.message
 
 
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")], ids=["nan", "inf"])
+def test_nonfinite_df_halts_typed_not_raw(tmp_path: Path, bad_value: float) -> None:
+    # REJECT-2: int(NaN/Inf) raises raw ValueError/OverflowError — the
+    # guard must prove finiteness before any integer conversion.
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(_result(dict(_good_fit(), df=bad_value)), tmp_path)
+    assert "df" in excinfo.value.message
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")], ids=["nan", "inf"])
+def test_nonfinite_nfree_halts_typed_not_raw(tmp_path: Path, bad_value: float) -> None:
+    result = _result()
+    result["model"] = {"syntax": "F3 ~ F1 + F2\nF4 ~ F3", "nfree": bad_value}
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "nfree" in excinfo.value.message
+
+
 @pytest.mark.parametrize(
     ("mutate", "named"),
     [
