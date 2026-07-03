@@ -50,11 +50,11 @@ def test_close_fit_published_anchor_through_r(tmp_path: Path) -> None:  # AT-M09
     assert result["power"] == pytest.approx(0.378, abs=0.001)
 
 
-def test_montecarlo_op_halts_typed_pending_escalation(tmp_path: Path) -> None:
+def test_unknown_op_halts_typed(tmp_path: Path) -> None:
     with pytest.raises(IntegrityHalt) as excinfo:
-        _call("power_worker", {"op": "montecarlo"}, tmp_path, "mc-blocked")
+        _call("power_worker", {"op": "bogus"}, tmp_path, "op-bogus")
     assert "nonzero" in excinfo.value.message
-    assert "E-R3" in str(excinfo.value.to_report()["details"])
+    assert "unimplemented op" in str(excinfo.value.to_report()["details"])
 
 
 def _diagnostics_payload() -> dict[str, Any]:

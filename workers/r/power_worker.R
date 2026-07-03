@@ -5,13 +5,15 @@
 # (1-alpha) quantile of the noncentral chi-square under H0, and power is
 # the upper tail of the H1 distribution at that critical value.
 #
-# Payload: { op: "close_fit", df, n, rmsea0, rmsea_a, alpha } — every value
-# supplied by the caller from governed sources.
-#
-# The Monte Carlo op (PB-01, simsem) is NOT implemented here: the governed
-# R stack (04: lavaan/semTools/simsem) is not yet in workers/r/renv.lock
-# (escalation E-R3); this worker ships no placeholder statistics. An
-# unknown or unimplemented op aborts loudly.
+# Payload ops:
+# - close_fit: { df, n, rmsea0, rmsea_a, alpha } — every value supplied
+#   by the caller from governed sources.
+# - montecarlo: { population_model, analysis_model, focal_paths, n,
+#   replications, alpha, seed } — simsem over lavaan (E-R3 resolved
+#   2026-07-03: renv extended with the docs/04 governed stack). The
+#   population syntax carries exact standardized values from the PB-01
+#   montecarlo_population criterion; the seed makes runs bit-reproducible
+#   (NFR-101). An unknown op aborts loudly.
 
 run_worker <- function(payload) {
   op <- payload$op
@@ -35,6 +37,38 @@ run_worker <- function(payload) {
       lambda_a = lambda_a
     ))
   }
-  stop("power_worker: unimplemented op '", op,
-       "' (montecarlo awaits the governed R stack; escalation E-R3)")
+  if (identical(op, "montecarlo")) {
+    # simsem resolves lavaanfun by name on the search path: lavaan (and
+    # simsem itself) must be ATTACHED, not merely loaded as namespaces.
+    suppressPackageStartupMessages({
+      library(lavaan) # nolint: object_usage_linter.
+      library(simsem) # nolint: object_usage_linter.
+    })
+    replications <- as.integer(payload$replications)
+    n <- as.integer(payload$n)
+    stopifnot(replications >= 2L, n >= 10L)
+    output <- simsem::sim(
+      nRep = replications,
+      model = payload$analysis_model,
+      n = n,
+      generate = payload$population_model,
+      lavaanfun = "sem",
+      seed = as.integer(payload$seed),
+      silent = TRUE
+    )
+    power_table <- simsem::getPower(output, alpha = as.numeric(payload$alpha))
+    power_names <- rownames(power_table)
+    if (is.null(power_names)) power_names <- names(power_table)
+    power_values <- as.numeric(power_table)
+    focal <- unlist(payload$focal_paths)
+    selected <- match(focal, power_names)
+    stopifnot(!anyNA(selected))
+    power <- as.list(stats::setNames(power_values[selected], focal))
+    converged <- tryCatch(
+      sum(output@converged == 0L),
+      error = function(condition) replications
+    )
+    return(list(power = power, converged = converged))
+  }
+  stop("power_worker: unimplemented op '", op, "'")
 }

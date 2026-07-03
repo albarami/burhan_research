@@ -25,9 +25,9 @@ floor, :func:`power_gate` emits the Method Advisory through TC-02's
 machinery and stops (FR-403: report the shortfall prominently, never
 silently proceed).
 
-Monte Carlo power (PB-01, simsem) is escalated: the governed R stack
-(04 §: lavaan/semTools/simsem) is not yet in workers/r/renv.lock, and
-this module ships no placeholder statistics.
+Monte Carlo power (PB-01, simsem) lives in :mod:`burhan.stats.montecarlo`
+over the R worker (E-R3 resolved 2026-07-03: renv extended with the
+docs/04 governed stack).
 """
 
 from __future__ import annotations

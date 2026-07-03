@@ -124,11 +124,17 @@ def test_missing_n_q_criterion_halts() -> None:
     assert "lacks" in excinfo.value.message
 
 
-def test_modules_expose_no_montecarlo_placeholder() -> None:
-    # FR-401's Monte Carlo is escalated (E-R3); until the governed R stack
-    # lands, no function pretends to provide it (no placeholder statistics).
+def test_montecarlo_lives_in_its_own_module_with_no_placeholder_path() -> None:
+    # E-R3 resolved (2026-07-03): the real implementation is
+    # stats.montecarlo.montecarlo_power over the R worker; the close-fit
+    # modules still expose no Monte Carlo shim, and no escalation marker
+    # remains in the worker.
+    from burhan.stats.montecarlo import montecarlo_power
+
+    assert callable(montecarlo_power)
     public_power = [n for n in dir(power_module) if not n.startswith("_")]
     public_assumptions = [n for n in dir(assumptions_module) if not n.startswith("_")]
     for name in public_power + public_assumptions:
         assert "montecarlo" not in name.lower()
-        assert "simsem" not in name.lower()
+    worker = (REPO / "workers" / "r" / "power_worker.R").read_text(encoding="utf-8")
+    assert "E-R3" not in worker or "resolved" in worker
