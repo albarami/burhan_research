@@ -111,7 +111,7 @@ API keys via environment variables only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`),
 | Env integrity | `uv.lock` + `renv.lock` hashes asserted at startup and recorded | NFR-102 |
 | Parallelism | derived-seed workers only where certification proves bit-stability; else serial | AD-07 |
 
-Certified pinned statistical outputs (known-answer seeds for optimizer-based simulations) are recorded **per certified environment** — the reference workstation and the CI regression runner — because bit-reproducibility (NFR-101) holds within an environment, not across differently built BLAS/linear-algebra binaries; cross-environment agreement is governed by the certified tolerance regime (FR-902), never bitwise equality. Platform-keyed pins in certification tests are sanctioned accordingly.
+Certified pinned statistical outputs (known-answer seeds for optimizer-based simulations) are recorded for the **reference workstation only**, identified by the governed environment marker `BURHAN_CERTIFIED_WORKSTATION=1` in the §6 environment file; byte-identical re-runs on that workstation remain the NFR-101 contract, unchanged. Hosted CI runners are heterogeneous below the image level (fleet evidence 2026-07-03: identical SHA and image, push run 28677321509 green, pull-request run 28677530775 zero-match), so cross-platform numeric policy for Monte Carlo outputs is: identical-seed determinism asserted exactly in every environment, and values asserted against the workstation anchors within a stated Monte Carlo tolerance band — never skipped, never bitwise across hosts.
 
 ## 8. Bootstrap Procedure (one-time)
 
