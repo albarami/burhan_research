@@ -165,6 +165,45 @@ def test_over_explained_population_halts() -> None:
     assert "over-explains" in excinfo.value.message
 
 
+class _CannedWorker:
+    def __init__(self, result: dict[str, object]) -> None:
+        self._result = result
+
+    def call(self, *args: object, **kwargs: object) -> dict[str, object]:
+        return self._result
+
+
+@pytest.mark.parametrize(
+    "converged",
+    [
+        None,  # absent entirely
+        "forty",  # not an integer
+        41,  # exceeds replications
+        -1,  # negative
+        39.5,  # non-integral number
+    ],
+)
+def test_malformed_converged_halts_typed(
+    tmp_path: Path, converged: object
+) -> None:  # REJECT-TC09 round 2 fix 1
+    result: dict[str, object] = {"power": {"CUL~RES": 0.9, "INT~CUL": 0.9}}
+    if converged is not None:
+        result["converged"] = converged
+    with pytest.raises(IntegrityHalt) as excinfo:  # typed, never a silent default
+        montecarlo_power(
+            _golden_config(),
+            n=200,
+            seed=1,
+            policy=_policy(),
+            playbook=_playbook(),
+            rworker=_CannedWorker(result),  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id=f"mc-conv-{converged}",
+            replications=40,
+        )
+    assert "converged" in excinfo.value.message
+
+
 def test_missing_focal_power_in_result_halts(tmp_path: Path) -> None:
     class HollowWorker:
         @staticmethod
