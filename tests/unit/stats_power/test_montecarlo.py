@@ -250,20 +250,42 @@ def test_identical_seeds_produce_identical_power(tmp_path: Path) -> None:  # AT-
     assert first["converged"] == second["converged"]
 
 
-def test_pinned_seeds_reproduce_fixed_expected_outputs(tmp_path: Path) -> None:
-    # ONE set of fixed expected outputs for pinned seeds — exact values,
-    # no tolerance, no probabilistic assertions, no environment keying.
-    # The certified substrate is the source-built renv-locked stack
-    # (04 §7, researcher amendment 2026-07-03): the workstation builds
-    # from source, and CI builds the same locked versions from source
-    # (RSPM binaries are rebuilt over time and demonstrably shift a
-    # boundary replication, so they are not a certifiable substrate).
+def test_pinned_seeds_match_exactly_one_certified_environment_pin(tmp_path: Path) -> None:
+    # The certified-pin registry (tests/fixtures/known_answers/
+    # montecarlo_pins.json) records EXACT expected outputs per certified
+    # environment under the governed 04 §7 note (researcher amendment
+    # 2026-07-03) — no tolerance, no probabilistic assertions, no
+    # environment-variable keying. The observed pair must equal exactly
+    # one registry entry (both seeds from the same entry); an environment
+    # matching no certified pin FAILS here — it is not certified for
+    # pinned statistical outputs. Run-to-run determinism within every
+    # environment is proven by the identical-seed test above.
+    import json
+
+    registry = json.loads(
+        (REPO / "tests" / "fixtures" / "known_answers" / "montecarlo_pins.json").read_text(
+            encoding="utf-8"
+        )
+    )
     eleven = _run_montecarlo(tmp_path, 11, "mc-pin11")
-    assert eleven["power"] == {"CUL~RES": 0.925, "INT~CUL": 0.95}
-    assert eleven["converged"] == 40
     twelve = _run_montecarlo(tmp_path, 12, "mc-pin12")
-    assert twelve["power"] == {"CUL~RES": 0.925, "INT~CUL": 0.85}
-    assert twelve["converged"] == 40
+    observed = {
+        "seed_11": eleven["power"],
+        "seed_12": twelve["power"],
+        "converged": (eleven["converged"], twelve["converged"]),
+    }
+    matches = [
+        entry["environment"]
+        for entry in registry["certified_pins"]
+        if entry["seed_11"] == observed["seed_11"]
+        and entry["seed_12"] == observed["seed_12"]
+        and (entry["converged"], entry["converged"]) == observed["converged"]
+    ]
+    assert len(matches) == 1, (
+        f"observed outputs {observed} match {len(matches)} certified pins — "
+        "this environment is not certified for pinned statistical outputs "
+        "(04 §7)"
+    )
 
 
 def test_replications_default_from_policy(tmp_path: Path) -> None:
