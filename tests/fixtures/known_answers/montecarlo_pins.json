@@ -1,0 +1,20 @@
+{
+  "authority": "04_ENVIRONMENT_AND_STACK.md SS7 (researcher amendment 2026-07-03): certified pinned statistical outputs are recorded per certified environment; cross-environment agreement is governed by the FR-902 tolerance regime, never bitwise equality.",
+  "model": "golden config (build_golden(11)), n=200, replications=40, alpha=0.05, PB-01 population (loadings .70 / paths .30 / corr .30)",
+  "certified_pins": [
+    {
+      "environment": "reference-workstation: CRAN apt R 4.5.2, source-built renv stack (E-R3)",
+      "captured": "2026-07-03",
+      "seed_11": { "CUL~RES": 0.925, "INT~CUL": 0.95 },
+      "seed_12": { "CUL~RES": 0.925, "INT~CUL": 0.85 },
+      "converged": 40
+    },
+    {
+      "environment": "ci-runner: r-lib R 4.5.2 on ubuntu-latest, source-built renv stack (no RSPM)",
+      "captured": "2026-07-03 (runs 28672027588, 28671492033: seed-12 CUL~RES resolves one boundary replication, 1/40, differently on the r-lib base-R build)",
+      "seed_11": { "CUL~RES": 0.925, "INT~CUL": 0.95 },
+      "seed_12": { "CUL~RES": 0.95, "INT~CUL": 0.85 },
+      "converged": 40
+    }
+  ]
+}
