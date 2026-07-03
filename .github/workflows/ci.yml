@@ -36,7 +36,14 @@ jobs:
         run: |
           Rscript -e "install.packages('renv', repos = 'https://cloud.r-project.org')"
           Rscript -e "renv::restore(prompt = FALSE)"
-          Rscript -e "status <- renv::status(); print(status); stopifnot(isTRUE(status[['synchronized']]))"
+          Rscript -e "status <- renv::status(); stopifnot(isTRUE(status[['synchronized']]))"
+      - name: expose the renv project library to worker sessions
+        # Worker harness sessions start outside workers/r (no .Rprofile
+        # activation), so the locked project library must be on R_LIBS for
+        # jsonlite 2.0.0 to resolve exactly as renv.lock pins it.
+        working-directory: workers/r
+        run: |
+          echo "R_LIBS=$(Rscript -e 'cat(renv::paths[["library"]]())')" >> "$GITHUB_ENV"
       - name: ruff
         run: uv run ruff check .
       - name: ruff format check
