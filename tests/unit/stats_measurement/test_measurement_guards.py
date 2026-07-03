@@ -352,6 +352,50 @@ def test_malformed_l2_reliability_halts(tmp_path: Path) -> None:
     assert "second_order reliability" in excinfo.value.message
 
 
+@pytest.mark.parametrize("field", ["cr_l2", "omega_l1"])
+@pytest.mark.parametrize(
+    "bad_value",
+    [-0.1, 0.0, 1.7, True, None, "high"],
+    ids=["negative", "zero", "above_one", "boolean", "null", "nonnumeric"],
+)
+def test_out_of_range_l2_reliability_halts(tmp_path: Path, field: str, bad_value: object) -> None:
+    # Reliability is a proportion: both L2 fields must be real numbers in
+    # (0, 1]. Impossible values from the worker halt typed, naming the field.
+    def add_second_order(data: dict[str, Any]) -> None:
+        data["constructs"].append(
+            {
+                "code": "SO",
+                "name": "Second order",
+                "level": "second_order",
+                "measurement": "reflective",
+                "components": ["FA", "FB"],
+            }
+        )
+        data["higher_order"] = {
+            "approach": "repeated_indicator",
+            "structural_carry": "full_hierarchy",
+        }
+
+    reliability: dict[str, Any] = {"construct": "SO", "cr_l2": 0.7, "omega_l1": 0.7}
+    reliability[field] = bad_value
+    result = {
+        **_BASE_OK,
+        "second_order": {"loadings": [], "reliability": reliability, "stage": 1},
+    }
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_measurement(
+            validity_frame(),
+            _config(add_second_order),
+            policy=_policy(),
+            playbook=_playbook(),
+            rworker=_CannedWorker(result),  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id="guard-l2-range",
+        )
+    assert "second_order reliability" in excinfo.value.message
+    assert excinfo.value.details == {"field": field}
+
+
 def test_fornell_larcker_fails_when_shared_variance_exceeds_ave(tmp_path: Path) -> None:
     # Negative control for the F–L rule itself: AVE .55 against a latent
     # correlation of .80 (shared variance .64) must fail the criterion.

@@ -272,10 +272,11 @@ def run_measurement(
         )
         second_reliability = _require_mapping(second.get("reliability"), "second_order reliability")
         for key in ("cr_l2", "omega_l1"):
-            if not _is_number(second_reliability.get(key)):
+            value = second_reliability.get(key)
+            if not _is_number(value) or not 0.0 < value <= 1.0:
                 halt(
                     IntegrityHalt(
-                        "measurement second_order reliability is missing or malformed",
+                        "measurement second_order reliability is missing or out of range",
                         report={"field": key},
                     )
                 )
