@@ -46,3 +46,28 @@ were written:
   **±0.025** of the published value — ≈ 2× the largest measured
   cross-resampler deviation, and far below the smallest CI half-width
   (≈ 0.056) — plus byte-identical reproduction across same-seed runs.
+
+## Engine-path benchmark (run_effects on Mplus UG ex5.11)
+
+The ex3.16 example is an observed-variable path model, which a study
+contract cannot express (constructs require ≥ 2 indicators), so it
+certifies the R worker directly. The **engine path** is certified on
+the published **ex5.11 latent model** (data + printed values:
+`tests/unit/stats_structural/PROVENANCE.md`, sha256
+`6c238edf…4799d919`) expressed as a study contract: H1–H3 are the
+published regressions, H4 hypothesizes the mediation chain the model
+implies (F1 → F3 → F4) with **no direct F1 → F4 edge — exactly the
+published model**.
+
+- Path estimates reproduce the printed values (.563, .790, .473) at
+  printed precision through `run_effects`.
+- Indirect F1→F4 = .266 at 3 decimals (= .563 × .473, the product of
+  printed estimates; engine full-precision .266291).
+- Bootstrap CI for the indirect effect is not printed in the published
+  output; the reference is the renv-locked lavaan itself, captured
+  2026-07-04 through `run_effects` (seed 1, R = 1000, `bca.simple`):
+  **[0.195444, 0.360454]**, pinned within **±0.005** (same-seed draws
+  are identical; the margin covers order-statistic sensitivity to
+  host floating-point only).
+- Classification: direct edge absent → `indirect_only` (Zhao's
+  no-direct branch; zhao2010).

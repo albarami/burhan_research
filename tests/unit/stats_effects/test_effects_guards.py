@@ -46,7 +46,18 @@ def _result(resamples: int = 1000) -> dict[str, Any]:
             "ci_level": 0.95,
             "ci_type": "bias_corrected",
         },
-        "paths": [],
+        "paths": [
+            {
+                "lhs": lhs,
+                "rhs": rhs,
+                "est": 0.4,
+                "se": 0.05,
+                "ci_low": 0.3,
+                "ci_high": 0.5,
+                "p": 0.01,
+            }
+            for lhs, rhs in (("Y", "X"), ("M", "X"), ("Y", "M"))
+        ],
         "effects": [
             {
                 "id": "H2",
@@ -169,10 +180,61 @@ def test_via_unknown_construct_halts(tmp_path: Path) -> None:
     assert "unknown construct" in excinfo.value.message
 
 
-def test_indirect_without_direct_edge_halts(tmp_path: Path) -> None:
-    # PB-17 decomposition (and the Zhao typology) require the direct path
-    # to be estimated; an indirect hypothesis without the direct edge in
-    # the model halts.
+def test_indirect_without_direct_edge_builds_chain_only_model(tmp_path: Path) -> None:
+    # A contract may hypothesize mediation without a direct edge — the
+    # direct effect is then constrained to zero by the declared model
+    # (the published ex3.16 anchor has exactly this shape).
+    config = _config_variant(
+        [
+            {
+                "id": "H2",
+                "effect": "indirect",
+                "from": "X",
+                "to": "Y",
+                "sign": "positive",
+                "via": ["M"],
+            }
+        ]
+    )
+    payload = build_effects_payload(mediation_frame(), config, policy=policy_with(tmp_path))
+    pairs = {(r["lhs"], r["rhs"]) for r in payload["regressions"]}
+    assert pairs == {("M", "X"), ("Y", "M")}
+
+
+def test_no_direct_edge_report_carries_none_blocks(tmp_path: Path) -> None:
+    config = _config_variant(
+        [
+            {
+                "id": "H2",
+                "effect": "indirect",
+                "from": "X",
+                "to": "Y",
+                "sign": "positive",
+                "via": ["M"],
+            }
+        ]
+    )
+    result = _result()
+    result["effects"][0]["direct"] = None
+    result["effects"][0]["total"] = None
+    result["paths"] = [row for row in result["paths"] if (row["lhs"], row["rhs"]) != ("Y", "X")]
+    report = run_effects(
+        mediation_frame(),
+        config,
+        policy=policy_with(tmp_path, resamples=1000),
+        playbook=playbook(),
+        rworker=_CannedWorker(result),  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        call_id="guard-nodirect",
+    )
+    (entry,) = report["effects"]
+    assert entry["direct"] is None
+    assert entry["total"] is None
+    assert entry["classification"] == "indirect_only"
+
+
+def test_direct_block_for_undeclared_edge_halts(tmp_path: Path) -> None:
+    # The worker must not invent a direct effect the model never declared.
     config = _config_variant(
         [
             {
@@ -186,8 +248,16 @@ def test_indirect_without_direct_edge_halts(tmp_path: Path) -> None:
         ]
     )
     with pytest.raises(IntegrityHalt) as excinfo:
-        build_effects_payload(mediation_frame(), config, policy=policy_with(tmp_path))
-    assert "direct path" in excinfo.value.message
+        run_effects(
+            mediation_frame(),
+            config,
+            policy=policy_with(tmp_path, resamples=1000),
+            playbook=playbook(),
+            rworker=_CannedWorker(_result()),  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id="guard-invented-direct",
+        )
+    assert "undeclared direct edge" in excinfo.value.message
 
 
 def test_payload_regressions_cover_chain_and_direct(tmp_path: Path) -> None:
@@ -323,6 +393,169 @@ def test_nonmapping_effects_entry_halts(tmp_path: Path) -> None:
     with pytest.raises(IntegrityHalt) as excinfo:
         _run_with(result, tmp_path)
     assert "malformed" in excinfo.value.message
+
+
+def _path_row(lhs: str, rhs: str, **overrides: Any) -> dict[str, Any]:
+    row = {"lhs": lhs, "rhs": rhs, "est": 0.4, "se": 0.05, "ci_low": 0.3, "ci_high": 0.5, "p": 0.01}
+    row.update(overrides)
+    return row
+
+
+def _full_paths() -> list[dict[str, Any]]:
+    return [_path_row("Y", "X"), _path_row("M", "X"), _path_row("Y", "M")]
+
+
+def test_paths_must_cover_model_pairs_exactly(tmp_path: Path) -> None:
+    result = _result()
+    result["paths"] = _full_paths()[:2]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "missing" in excinfo.value.message
+    result = _result()
+    result["paths"] = [*_full_paths(), _path_row("NOPE", "FZ")]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "extra" in excinfo.value.message
+    result = _result()
+    result["paths"] = [*_full_paths(), _path_row("Y", "X")]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "duplicate" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("est", "not-a-number"),
+        ("est", float("nan")),
+        ("se", -0.1),
+        ("ci_low", float("inf")),
+        ("p", 1.5),
+    ],
+    ids=["est_str", "est_nan", "se_negative", "ci_inf", "p_above_one"],
+)
+def test_malformed_path_entry_halts(tmp_path: Path, field: str, bad_value: Any) -> None:
+    result = _result()
+    result["paths"] = _full_paths()
+    result["paths"][0][field] = bad_value
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert field in excinfo.value.message
+
+
+def test_unexpected_sum_group_halts(tmp_path: Path) -> None:
+    # One indirect spec per pair -> no sums expected; a worker sum is an
+    # extra unrequested group, never silently accepted.
+    result = _result()
+    result["sums"] = [
+        {"from": "X", "to": "Y", "est": 0.35, "se": 0.05, "ci_low": 0.2, "ci_high": 0.5, "p": None}
+    ]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "extra" in excinfo.value.message
+
+
+def test_malformed_sum_entry_halts(tmp_path: Path) -> None:
+    result = _result()
+    result["sums"] = [
+        {"from": "X", "to": "Y", "est": float("nan"), "se": 0.05, "ci_low": 0.1, "ci_high": 0.2}
+    ]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert "est" in excinfo.value.message or "extra" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    ("mutate", "named"),
+    [
+        (lambda r: r.update(paths="nope"), "paths block"),
+        (lambda r: r.update(paths=[{"lhs": "Y"}]), "paths entry"),
+        (lambda r: r.update(sums="nope"), "sums block"),
+        (lambda r: r.update(sums=["nope"]), "sums entry"),
+    ],
+    ids=["paths_not_list", "paths_entry_malformed", "sums_not_list", "sums_entry_malformed"],
+)
+def test_malformed_paths_sums_shapes_halt(tmp_path: Path, mutate: Any, named: str) -> None:
+    result = _result()
+    mutate(result)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _run_with(result, tmp_path)
+    assert named in excinfo.value.message
+
+
+def _two_indirect_config() -> StudyConfig:
+    return _config_variant(
+        [
+            {"id": "H1", "effect": "direct", "from": "X", "to": "Y", "sign": "positive"},
+            {
+                "id": "H2",
+                "effect": "indirect",
+                "from": "X",
+                "to": "Y",
+                "sign": "positive",
+                "via": ["M"],
+            },
+            {
+                "id": "H3",
+                "effect": "indirect",
+                "from": "X",
+                "to": "Y",
+                "sign": "positive",
+                "via": ["M"],
+            },
+        ]
+    )
+
+
+def _two_indirect_result(sums: list[dict[str, Any]]) -> dict[str, Any]:
+    result = _result()
+    result["effects"] = [
+        dict(result["effects"][0], id="H2"),
+        dict(result["effects"][0], id="H3"),
+    ]
+    result["sums"] = sums
+    return result
+
+
+def test_missing_expected_sum_group_halts(tmp_path: Path) -> None:
+    # Two indirect specs on the same pair -> the per-pair sum is a
+    # contract output; a worker omitting it halts.
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_effects(
+            mediation_frame(),
+            _two_indirect_config(),
+            policy=policy_with(tmp_path, resamples=1000),
+            playbook=playbook(),
+            rworker=_CannedWorker(_two_indirect_result([])),  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id="guard-missing-sum",
+        )
+    assert "missing" in excinfo.value.message
+
+
+def test_duplicate_sum_group_halts(tmp_path: Path) -> None:
+    sum_block = {
+        "from": "X",
+        "to": "Y",
+        "est": 0.7,
+        "se": 0.05,
+        "ci_low": 0.5,
+        "ci_high": 0.9,
+        "p": None,
+    }
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_effects(
+            mediation_frame(),
+            _two_indirect_config(),
+            policy=policy_with(tmp_path, resamples=1000),
+            playbook=playbook(),
+            rworker=_CannedWorker(  # type: ignore[arg-type]
+                _two_indirect_result([sum_block, dict(sum_block)])
+            ),
+            run_dir=tmp_path,
+            call_id="guard-dup-sum",
+        )
+    assert "duplicate" in excinfo.value.message
 
 
 def test_doctored_pb17_without_criteria_halts(tmp_path: Path) -> None:

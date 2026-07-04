@@ -118,6 +118,85 @@ def test_identical_seed_reproduces_identically(tmp_path: Path) -> None:
     assert first == second
 
 
+# ---- engine-path benchmark (run_effects on the published ex5.11 model) ----
+
+# Published ex5.11 path estimates (tests/unit/stats_structural/PROVENANCE.md)
+EX511_PUBLISHED_PATHS = {("F3", "F1"): 0.563, ("F3", "F2"): 0.790, ("F4", "F3"): 0.473}
+# Derived from published paths: indirect F1→F4 via F3 = .563 × .473
+EX511_INDIRECT_EST = 0.266
+# Fixed-seed bootstrap CI captured on the renv-locked stack through
+# run_effects (seed 1, R = 1000, bca.simple; PROVENANCE.md)
+EX511_INDIRECT_CI = {"ci_low": 0.195444, "ci_high": 0.360454}
+EX511_CI_TOLERANCE = 0.005
+
+
+def _run_engine(tmp_path: Path) -> dict[str, Any]:
+    from effects_util import ex511_config, ex511_frame, playbook
+
+    from burhan.stats.effects import run_effects
+
+    return run_effects(
+        ex511_frame(),
+        ex511_config(),
+        policy=policy_with(tmp_path, resamples=1000),
+        playbook=playbook(),
+        rworker=RWorker(),
+        run_dir=tmp_path,
+        call_id="bench-e511",
+    )
+
+
+def test_engine_path_reproduces_published_model(tmp_path: Path) -> None:
+    # AT-M11-2 through the delivered Python engine: build_effects_payload
+    # + run_effects + validation, on the published latent mediation chain
+    # (no direct F1→F4 edge — exactly the published model).
+    report = _run_engine(tmp_path)
+    paths = {(p["lhs"], p["rhs"]): p["est"] for p in report["paths"]}
+    for key, published in EX511_PUBLISHED_PATHS.items():
+        assert round(paths[key], 3) == published, key
+    (row,) = report["effects"]
+    assert round(row["indirect"]["est"], 3) == EX511_INDIRECT_EST
+    assert row["direct"] is None
+    assert row["total"] is None
+    assert row["classification"] == "indirect_only"
+    for bound, pinned in EX511_INDIRECT_CI.items():
+        assert abs(row["indirect"][bound] - pinned) <= EX511_CI_TOLERANCE, bound
+    assert report["bootstrap"] == {
+        "resamples": 1000,
+        "completed": 1000,
+        "ci_level": 0.95,
+        "ci_type": "bias_corrected",
+    }
+
+
+def test_engine_report_flows_into_store_and_matrix(tmp_path: Path) -> None:
+    # The live engine report round-trips: store rows written through the
+    # real append-only ResultsStore, every matrix ID resolving.
+    import datetime as dt
+
+    from effects_util import ex511_config, playbook
+
+    from burhan.results.store import ResultsStore
+    from burhan.stats.effects import effects_store_rows
+    from burhan.stats.hypothesis_matrix import build_hypothesis_matrix
+
+    class FixedClock:
+        def now(self) -> dt.datetime:
+            return dt.datetime(2026, 7, 4, 12, 0, 0, tzinfo=dt.UTC)
+
+    report = _run_engine(tmp_path)
+    store = ResultsStore(tmp_path / "results", FixedClock())
+    for payload in effects_store_rows(report):
+        store.write(payload)
+    rows = build_hypothesis_matrix(ex511_config(), report, playbook=playbook())
+    indirect_rows = [row for row in rows if row["effect"] == "indirect"]
+    assert [row["hypothesis"] for row in indirect_rows] == ["H4"]
+    for row in indirect_rows:
+        assert store.resolve(row["statistic_id"]).stage == "effects"
+        assert store.resolve(row["classification_id"]).value == "indirect_only"
+    assert indirect_rows[0]["verdict"] == "supported"
+
+
 def test_resamples_read_from_policy(tmp_path: Path) -> None:
     # AT-M11-2: the resample count comes from the policy layer, never a
     # constant — the engine payload embeds exactly the policy value.

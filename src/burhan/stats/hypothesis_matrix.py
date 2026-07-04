@@ -72,13 +72,17 @@ def build_hypothesis_matrix(
 ) -> list[dict[str, str]]:
     """H# → path → statistic ID → verdict, from validated effects output."""
     rule = significance_rule(playbook)
-    direct_blocks: dict[tuple[str, str], Mapping[str, Any]] = {}
+    # Direct effects come from the validated bootstrap path rows (every
+    # declared edge is estimated); indirect/total from the effect rows.
+    direct_blocks: dict[tuple[str, str], Mapping[str, Any]] = {
+        (str(row["rhs"]), str(row["lhs"])): row for row in effects_report["paths"]
+    }
     indirect_rows: dict[tuple[str, str, tuple[str, ...]], Mapping[str, Any]] = {}
     total_blocks: dict[tuple[str, str], Mapping[str, Any]] = {}
     for row in effects_report["effects"]:
         pair = (str(row["from"]), str(row["to"]))
-        direct_blocks[pair] = row["direct"]
-        total_blocks[pair] = row["total"]
+        if row["total"] is not None:
+            total_blocks[pair] = row["total"]
         indirect_rows[(pair[0], pair[1], tuple(row["via"]))] = row
 
     def _missing(hypothesis_id: str) -> NoReturn:

@@ -134,3 +134,78 @@ def mediation_frame(
 def effect_block(est: float, ci_low: float, ci_high: float, *, se: float = 0.05) -> dict[str, Any]:
     """A valid worker effect block for canned classification fixtures."""
     return {"est": est, "se": se, "ci_low": ci_low, "ci_high": ci_high, "p": None}
+
+
+def ex511_frame() -> pd.DataFrame:
+    """The committed Mplus UG ex5.11 dataset (tests/unit/stats_structural/)."""
+    frame = pd.read_csv(
+        REPO / "tests" / "unit" / "stats_structural" / "ex5.11.dat",
+        sep=r"\s+",
+        header=None,
+        names=[f"y{i}" for i in range(1, 13)],
+    )
+    frame.index = pd.Index([f"R_{i:04d}" for i in range(1, len(frame) + 1)], name="case")
+    return frame
+
+
+def ex511_config() -> StudyConfig:
+    """The published ex5.11 model as a study contract, plus the mediation
+    hypothesis its chain implies (F1 → F3 → F4; no direct F1 → F4 edge —
+    exactly the published model)."""
+    items = {f"F{k}": [f"y{(k - 1) * 3 + j}" for j in (1, 2, 3)] for k in (1, 2, 3, 4)}
+    data: dict[str, Any] = {
+        "schema_version": 1,
+        "meta": {
+            "study_id": "effects-ex511-benchmark",
+            "title": "Mplus UG ex5.11 effects benchmark",
+            "source_documents": [
+                {"role": "study_document", "path": "inputs/e511.docx", "sha256": "d" * 64}
+            ],
+        },
+        "methodology": {
+            "declared": "CB_SEM",
+            "playbook_id": "CB_SEM_PLAYBOOK",
+            "playbook_version": "1.0",
+            "design": "cross_sectional",
+        },
+        "instrument": {
+            "items": [
+                {
+                    "code": code,
+                    "text": f"{code} indicator.",
+                    "construct_ref": construct,
+                    "scale": {"type": "numeric", "min": -10, "max": 10},
+                    "reverse_coded": False,
+                    "column_hint": f"Q_{code}",
+                }
+                for construct, codes in items.items()
+                for code in codes
+            ]
+        },
+        "constructs": [
+            {
+                "code": construct,
+                "name": f"Factor {construct}",
+                "level": "first_order",
+                "measurement": "reflective",
+                "indicators": list(codes),
+            }
+            for construct, codes in items.items()
+        ],
+        "model": {"exogenous": ["F1", "F2"], "endogenous": ["F3", "F4"], "mediators": ["F3"]},
+        "hypotheses": [
+            {"id": "H1", "effect": "direct", "from": "F1", "to": "F3", "sign": "positive"},
+            {"id": "H2", "effect": "direct", "from": "F2", "to": "F3", "sign": "positive"},
+            {"id": "H3", "effect": "direct", "from": "F3", "to": "F4", "sign": "positive"},
+            {
+                "id": "H4",
+                "effect": "indirect",
+                "from": "F1",
+                "to": "F4",
+                "sign": "positive",
+                "via": ["F3"],
+            },
+        ],
+        "data": {"file": "inputs/e511.csv", "format": "csv"},
+    }
+    return validate_and_build(StudyConfig, data)

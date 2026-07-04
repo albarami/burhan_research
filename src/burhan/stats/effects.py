@@ -106,18 +106,6 @@ def build_effects_payload(
                     report={"hypothesis": hypothesis.id, "unknown": unknown},
                 )
             )
-        if (hypothesis.to, hypothesis.from_) not in direct_pairs:
-            halt(
-                IntegrityHalt(
-                    "indirect hypothesis requires the direct path in the model "
-                    "(PB-17 decomposition)",
-                    report={
-                        "hypothesis": hypothesis.id,
-                        "from": hypothesis.from_,
-                        "to": hypothesis.to,
-                    },
-                )
-            )
         for index in range(len(codes) - 1):
             chain_pairs.append((codes[index + 1], codes[index]))
         specs.append(
@@ -204,15 +192,20 @@ def _validate_block(block: object, *, name: str, hypothesis: str) -> dict[str, A
     }
 
 
-def classify_effect(direct: Mapping[str, Any], indirect: Mapping[str, Any]) -> str:
-    """Zhao–Lynch–Chen typology from CI significance and sign (PB-17)."""
+def classify_effect(direct: Mapping[str, Any] | None, indirect: Mapping[str, Any]) -> str:
+    """Zhao–Lynch–Chen typology from CI significance and sign (PB-17).
+
+    A model that declares no direct edge constrains the direct effect to
+    zero: it is definitionally not significant, which lands in Zhao's
+    indirect-only / no-effect branch (zhao2010).
+    """
 
     def _significant(block: Mapping[str, Any]) -> bool:
         return float(block["ci_low"]) > 0.0 or float(block["ci_high"]) < 0.0
 
     indirect_significant = _significant(indirect)
-    direct_significant = _significant(direct)
-    if indirect_significant and direct_significant:
+    direct_significant = direct is not None and _significant(direct)
+    if indirect_significant and direct_significant and direct is not None:
         if float(direct["est"]) * float(indirect["est"]) > 0.0:
             return "complementary"
         return "competitive"
@@ -346,63 +339,205 @@ def run_effects(
                 report={"extra": extra},
             )
         )
+    edge_pairs = {
+        (str(regression["lhs"]), str(regression["rhs"])) for regression in payload["regressions"]
+    }
     rows: list[dict[str, Any]] = []
     for spec in payload["indirect"]:
         entry = by_id[spec["id"]]
-        blocks = {
-            name: _validate_block(entry.get(name), name=name, hypothesis=spec["id"])
-            for name in _BLOCKS
-        }
+        has_direct = (spec["to"], spec["from"]) in edge_pairs
+        indirect_block = _validate_block(
+            entry.get("indirect"), name="indirect", hypothesis=spec["id"]
+        )
+        if has_direct:
+            direct_block: dict[str, Any] | None = _validate_block(
+                entry.get("direct"), name="direct", hypothesis=spec["id"]
+            )
+            total_block: dict[str, Any] | None = _validate_block(
+                entry.get("total"), name="total", hypothesis=spec["id"]
+            )
+        else:
+            for name in ("direct", "total"):
+                if entry.get(name) is not None:
+                    halt(
+                        IntegrityHalt(
+                            f"effects worker returned a {name} block for an undeclared direct edge",
+                            report={"hypothesis": spec["id"], "block": name},
+                        )
+                    )
+            direct_block = None
+            total_block = None
         rows.append(
             {
                 "hypothesis": spec["id"],
                 "from": spec["from"],
                 "to": spec["to"],
                 "via": list(spec["via"]),
-                "direct": blocks["direct"],
-                "indirect": blocks["indirect"],
-                "total": blocks["total"],
-                "classification": classify_effect(blocks["direct"], blocks["indirect"]),
+                "direct": direct_block,
+                "indirect": indirect_block,
+                "total": total_block,
+                "classification": classify_effect(direct_block, indirect_block),
             }
         )
+    expected_pairs = [
+        (str(regression["lhs"]), str(regression["rhs"])) for regression in payload["regressions"]
+    ]
+    group_counts: dict[tuple[str, str], int] = {}
+    for spec in payload["indirect"]:
+        key = (str(spec["from"]), str(spec["to"]))
+        group_counts[key] = group_counts.get(key, 0) + 1
+    expected_sums = sorted(key for key, count in group_counts.items() if count > 1)
     return {
         "bootstrap": bootstrap,
-        "paths": [dict(row) for row in result.get("paths", []) if isinstance(row, Mapping)],
+        "paths": _validate_paths(result.get("paths"), expected=expected_pairs),
         "effects": rows,
-        "sums": [dict(row) for row in result.get("sums", []) if isinstance(row, Mapping)],
+        "sums": _validate_sums(result.get("sums"), expected=expected_sums),
     }
 
 
-def effects_store_rows(report: Mapping[str, Any], *, created: str) -> list[dict[str, Any]]:
-    """Schema-valid results-store rows under the PB-17 output prefixes."""
+def _validate_paths(block: object, *, expected: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    if not isinstance(block, list):
+        halt(
+            IntegrityHalt(
+                "effects worker paths block is not a list",
+                report={"block": "paths"},
+            )
+        )
+    validated: list[dict[str, Any]] = []
+    returned: list[tuple[str, str]] = []
+    for entry in block:
+        if not isinstance(entry, Mapping) or not all(
+            isinstance(entry.get(key), str) for key in ("lhs", "rhs")
+        ):
+            halt(
+                IntegrityHalt(
+                    "effects paths entry is malformed",
+                    report={"block": "paths"},
+                )
+            )
+        pair = (str(entry["lhs"]), str(entry["rhs"]))
+        if pair in returned:
+            halt(
+                IntegrityHalt(
+                    "effects paths carry duplicate pairs",
+                    report={"duplicate": list(pair)},
+                )
+            )
+        returned.append(pair)
+        validated.append(
+            _validate_block(entry, name="paths", hypothesis=f"{pair[0]}~{pair[1]}")
+            | {"lhs": pair[0], "rhs": pair[1]}
+        )
+    missing = sorted(set(expected) - set(returned))
+    if missing:
+        halt(
+            IntegrityHalt(
+                "effects paths are missing model pairs",
+                report={"missing": [list(pair) for pair in missing]},
+            )
+        )
+    extra = sorted(set(returned) - set(expected))
+    if extra:
+        halt(
+            IntegrityHalt(
+                "effects paths carry extra unrequested pairs",
+                report={"extra": [list(pair) for pair in extra]},
+            )
+        )
+    return validated
+
+
+def _validate_sums(block: object, *, expected: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    if not isinstance(block, list):
+        halt(
+            IntegrityHalt(
+                "effects worker sums block is not a list",
+                report={"block": "sums"},
+            )
+        )
+    validated: list[dict[str, Any]] = []
+    returned: list[tuple[str, str]] = []
+    for entry in block:
+        if not isinstance(entry, Mapping) or not all(
+            isinstance(entry.get(key), str) for key in ("from", "to")
+        ):
+            halt(
+                IntegrityHalt(
+                    "effects sums entry is malformed",
+                    report={"block": "sums"},
+                )
+            )
+        pair = (str(entry["from"]), str(entry["to"]))
+        if pair in returned:
+            halt(
+                IntegrityHalt(
+                    "effects sums carry duplicate groups",
+                    report={"duplicate": list(pair)},
+                )
+            )
+        returned.append(pair)
+        validated.append(
+            _validate_block(entry, name="sums", hypothesis=f"{pair[0]}->{pair[1]}")
+            | {"from": pair[0], "to": pair[1]}
+        )
+    missing = sorted(set(expected) - set(returned))
+    if missing:
+        halt(
+            IntegrityHalt(
+                "effects sums are missing indirect groups",
+                report={"missing": [list(pair) for pair in missing]},
+            )
+        )
+    extra = sorted(set(returned) - set(expected))
+    if extra:
+        halt(
+            IntegrityHalt(
+                "effects sums carry extra unrequested groups",
+                report={"extra": [list(pair) for pair in extra]},
+            )
+        )
+    return validated
+
+
+def effects_store_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """ResultsStore.write payloads under the PB-17 output prefixes.
+
+    The store owns ``schema_version``, ``created``, and ``hash`` — these
+    payloads carry none of them, so every row is writable through the
+    append-only store as-is. Direct/total entries are emitted only when
+    the model declares the direct edge.
+    """
     ci_level = float(report["bootstrap"]["ci_level"])
     common = {
-        "schema_version": 1,
         "stage": "effects",
         "engine": "r_lavaan",
         "playbook_step": "PB-17",
-        "created": created,
-        "hash": "0" * 64,
     }
+
+    def _numeric_entry(stat_id: str, block: Mapping[str, Any]) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            **common,
+            "id": stat_id,
+            "value": block["est"],
+            "se": block["se"],
+            "ci_low": block["ci_low"],
+            "ci_high": block["ci_high"],
+            "ci_level": ci_level,
+        }
+        if block["p"] is not None:
+            entry["p"] = block["p"]
+        return entry
+
     entries: list[dict[str, Any]] = []
+    # every declared edge is a bootstrap-estimated direct effect
+    for path in report["paths"]:
+        entries.append(_numeric_entry(f"effects.direct.{path['rhs']}->{path['lhs']}", path))
     for row in report["effects"]:
         pair = f"{row['from']}->{row['to']}"
         via = "via_" + "_".join(row["via"])
-        for name, family in (("direct", "direct"), ("indirect", "indirect"), ("total", "total")):
-            block = row[name]
-            suffix = f".{via}" if family == "indirect" else ""
-            entry: dict[str, Any] = {
-                **common,
-                "id": f"effects.{family}.{pair}{suffix}",
-                "value": block["est"],
-                "se": block["se"],
-                "ci_low": block["ci_low"],
-                "ci_high": block["ci_high"],
-                "ci_level": ci_level,
-            }
-            if block["p"] is not None:
-                entry["p"] = block["p"]
-            entries.append(entry)
+        entries.append(_numeric_entry(f"effects.indirect.{pair}.{via}", row["indirect"]))
+        if row["total"] is not None:
+            entries.append(_numeric_entry(f"effects.total.{pair}", row["total"]))
         entries.append(
             {
                 **common,

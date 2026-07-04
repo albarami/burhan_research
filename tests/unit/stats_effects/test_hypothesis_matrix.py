@@ -22,6 +22,7 @@ def _report(
     direct: dict[str, Any] | None = None,
     indirect: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    direct = direct if direct is not None else effect_block(0.30, 0.15, 0.45)
     return {
         "bootstrap": {
             "resamples": 300,
@@ -29,14 +30,18 @@ def _report(
             "ci_level": 0.95,
             "ci_type": "bias_corrected",
         },
-        "paths": [],
+        "paths": [
+            {"lhs": "Y", "rhs": "X", **direct},
+            {"lhs": "M", "rhs": "X", **effect_block(0.55, 0.40, 0.70)},
+            {"lhs": "Y", "rhs": "M", **effect_block(0.60, 0.45, 0.75)},
+        ],
         "effects": [
             {
                 "hypothesis": "H2",
                 "from": "X",
                 "to": "Y",
                 "via": ["M"],
-                "direct": direct if direct is not None else effect_block(0.30, 0.15, 0.45),
+                "direct": direct,
                 "indirect": indirect if indirect is not None else effect_block(0.35, 0.20, 0.50),
                 "total": effect_block(0.65, 0.45, 0.85),
                 "classification": "complementary",
@@ -100,20 +105,37 @@ def test_rows_carry_only_statistic_ids_never_numbers() -> None:
     assert by_id["H1"]["rule_id"] == "PB-16.significance_rule"
 
 
-def test_matrix_ids_resolve_against_store_rows() -> None:
+def test_matrix_ids_resolve_through_the_append_only_store(tmp_path: Any) -> None:
+    # AT-M11-4: every matrix statistic resolves through the ACTUAL
+    # ResultsStore — rows are written via ResultsStore.write (which owns
+    # schema_version/created/hash) and looked up via resolve().
+    import datetime as dt
+
+    from burhan.results.store import ResultsStore
+
+    class FixedClock:
+        def now(self) -> dt.datetime:
+            return dt.datetime(2026, 7, 4, 12, 0, 0, tzinfo=dt.UTC)
+
     report = _report()
     rows = _matrix(report)
-    store_ids = {
-        entry["id"] for entry in effects_store_rows(report, created="2026-07-04T00:00:00Z")
-    }
+    store = ResultsStore(tmp_path / "results", FixedClock())
+    for payload in effects_store_rows(report):
+        store.write(payload)
     for row in rows:
-        assert row["statistic_id"] in store_ids, row["hypothesis"]
+        entry = store.resolve(row["statistic_id"])
+        assert entry.stage == "effects"
         if "classification_id" in row:
-            assert row["classification_id"] in store_ids
+            classification = store.resolve(row["classification_id"])
+            assert classification.value == "complementary"
 
 
-def test_store_rows_are_schema_shaped() -> None:
-    entries = effects_store_rows(_report(), created="2026-07-04T00:00:00Z")
+def test_store_rows_are_writable_payloads() -> None:
+    # The store owns schema_version/created/hash — payloads must not
+    # carry them (ResultsStore.write rejects caller-supplied values).
+    entries = effects_store_rows(_report())
+    for entry in entries:
+        assert not {"schema_version", "created", "hash"} & set(entry)
     by_id = {entry["id"]: entry for entry in entries}
     direct = by_id["effects.direct.X->Y"]
     assert direct["stage"] == "effects"
@@ -124,17 +146,31 @@ def test_store_rows_are_schema_shaped() -> None:
     assert direct["ci_level"] == 0.95
     classification = by_id["effects.classification.X->Y.via_M"]
     assert classification["value"] == "complementary"
-    with_p = effects_store_rows(
-        _report(direct=dict(effect_block(0.30, 0.15, 0.45), p=0.001)),
-        created="2026-07-04T00:00:00Z",
-    )
+    with_p = effects_store_rows(_report(direct=dict(effect_block(0.30, 0.15, 0.45), p=0.001)))
     direct_with_p = {entry["id"]: entry for entry in with_p}["effects.direct.X->Y"]
     assert direct_with_p["p"] == 0.001
+
+
+def test_store_rows_skip_absent_direct_and_total() -> None:
+    report = _report()
+    report["paths"] = []
+    report["effects"][0]["direct"] = None
+    report["effects"][0]["total"] = None
+    ids = {entry["id"] for entry in effects_store_rows(report)}
+    assert ids == {"effects.indirect.X->Y.via_M", "effects.classification.X->Y.via_M"}
 
 
 def test_hypothesis_without_computed_statistic_halts() -> None:
     report = _report()
     report["effects"] = []
+    with pytest.raises(IntegrityHalt) as excinfo:
+        _matrix(report)
+    assert "no computed statistic" in excinfo.value.message
+
+
+def test_direct_hypothesis_without_path_row_halts() -> None:
+    report = _report()
+    report["paths"] = [row for row in report["paths"] if (row["lhs"], row["rhs"]) != ("Y", "X")]
     with pytest.raises(IntegrityHalt) as excinfo:
         _matrix(report)
     assert "no computed statistic" in excinfo.value.message

@@ -42,6 +42,14 @@ def test_five_way_classification(
     assert classify_effect(direct, indirect) == expected
 
 
+def test_absent_direct_effect_classifies_on_indirect_alone() -> None:
+    # No direct edge in the declared model: the direct effect is
+    # constrained to zero, landing in Zhao's indirect-only / no-effect
+    # branch.
+    assert classify_effect(None, effect_block(0.35, 0.20, 0.50)) == "indirect_only"
+    assert classify_effect(None, effect_block(0.01, -0.05, 0.08)) == "no_effect"
+
+
 class _CannedWorker:
     def __init__(self, result: object) -> None:
         self._result = result
@@ -62,7 +70,18 @@ def _canned_result(resamples: int) -> dict[str, Any]:
             "ci_level": 0.95,
             "ci_type": "bias_corrected",
         },
-        "paths": [],
+        "paths": [
+            {
+                "lhs": lhs,
+                "rhs": rhs,
+                "est": 0.4,
+                "se": 0.05,
+                "ci_low": 0.3,
+                "ci_high": 0.5,
+                "p": 0.01,
+            }
+            for lhs, rhs in (("Y", "X"), ("M", "X"), ("Y", "M"))
+        ],
         "effects": [
             {
                 "id": "H2",
