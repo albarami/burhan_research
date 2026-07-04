@@ -10,7 +10,9 @@ A task contract is the unit of work: one contract → one branch → one PR → 
 
 ## Issue order
 
-TC-01 → TC-02 → TC-03 → TC-04 → TC-05 → TC-06 → TC-07 → TC-08a → TC-08b → TC-08c → TC-09 → TC-10a → TC-10b → TC-11a → TC-11b → TC-12 → *(M5 gate + M6 validation run)* → TC-13 → TC-14. One active contract at a time; milestone gates per the project plan interleave where marked.
+TC-01 → TC-02 → TC-03 → TC-04 → TC-05 → TC-06 → TC-07 → TC-08a → TC-08b → TC-08c → TC-09 → TC-10a → TC-10b → TC-11a → TC-11b → TC-12 → *(M5 gate → GATE FAIL at C4)* → TC-15 → *(M5 gate re-execution + M6 validation run)* → TC-13 → TC-14. One active contract at a time; milestone gates per the project plan interleave where marked.
+
+**TC-15** is a researcher-authored remediation contract (not part of the mechanical TC-01..TC-14 / 75-AT generation above): it wires the individually-certified Stage-1A modules into the orchestrator DAG — the integration work item the build spec never created — so certification C4 (IT-1..IT-3) can pass. It carries its own acceptance tests (AT-M15-1..5) and must be APPROVED before the M5 battery re-executes from §1.
 
 ## Change control
 
