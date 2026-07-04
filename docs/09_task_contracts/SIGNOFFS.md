@@ -22,6 +22,7 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 | TC-10a | d4b38b2 | 2026-07-03 | APPROVE | Measurement CFA/validity/CMB accepted; AT-M10-1..3 green, semTools reliability pins, typed second-order reliability guard, CI runs 28682109548/28682111052 green. |
 | TC-10b | 5a64a18 | 2026-07-03 | APPROVE | Deletion protocol and respecification accepted; invalid attestations and empty permit rules guarded, AT-M10-4..6 green, CI runs 28683917143/28683918295 green. |
 | TC-11a | 06f0542 | 2026-07-03 | APPROVE | Structural estimation accepted; AT-M11-1/5 green, typed fit/path/R² validation, carrier semantics, CI runs 28685721644/28685722979 green. |
+| TC-11b | 7449959 | 2026-07-04 | APPROVE | Effects and hypothesis matrix accepted; no-direct-edge engine benchmark, paths/sums validation, store-backed matrix IDs, CI runs 28696426699/28696427326 green. |
 
 **Milestone gate records** (researcher sign-offs; see plan ★/★★):
 
