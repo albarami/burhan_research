@@ -1,0 +1,57 @@
+{
+  "authority": "AT-M12-4 (FR-1502): certified by full replication of the published worked-example set; tolerances are the provenance-justified values from each anchor suite.",
+  "certified": {
+    "effects.indirect": {
+      "anchors": [
+        "mplus-ex3.16"
+      ],
+      "tolerance": 0.001
+    },
+    "effects.indirect_ci": {
+      "anchors": [
+        "mplus-ex3.16"
+      ],
+      "tolerance": 0.025
+    },
+    "measurement.loadings": {
+      "anchors": [
+        "mplus-ex5.6"
+      ],
+      "tolerance": 0.001
+    },
+    "measurement.reliability": {
+      "anchors": [
+        "mplus-ex5.6/semtools"
+      ],
+      "tolerance": 0.0001
+    },
+    "power.close_fit": {
+      "anchors": [
+        "maccallum-1996/jobst-2021"
+      ],
+      "tolerance": 0.001
+    },
+    "structural.fit": {
+      "anchors": [
+        "mplus-ex5.11"
+      ],
+      "tolerance": 0.001
+    },
+    "structural.paths": {
+      "anchors": [
+        "mplus-ex5.11"
+      ],
+      "tolerance": 0.001
+    },
+    "structural.r_squared": {
+      "anchors": [
+        "mplus-ex5.11/lavaan"
+      ],
+      "tolerance": 0.001
+    }
+  },
+  "non_parity": [
+    "estimator.wlsmv"
+  ],
+  "schema_version": 1
+}
