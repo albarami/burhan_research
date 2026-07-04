@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
 from generator import DEFECT_CLASSES, build_golden, build_missingness_fixture
 
 from burhan.core.artifacts.loader import validate_and_build
@@ -48,6 +49,25 @@ def test_clean_twin_has_no_defects() -> None:
         for column in item_columns:
             assert row[column] != ""  # complete
             assert 1 <= int(row[column]) <= 7  # in range
+
+
+def test_n_clean_scales_the_clean_block_and_keeps_ids_unique() -> None:
+    study = build_golden(11, with_defects=False, n_clean=200)
+    data = study.rows[3:]
+    assert len(data) == 200
+    ids = [row[0] for row in data]
+    assert len(ids) == len(set(ids))  # ids stay unique at the adequately-powered N
+    assert all(not entries for entries in study.manifest.values())  # still a clean twin
+
+
+def test_n_clean_defaults_to_the_certified_thirty_two() -> None:
+    # every existing golden caller is unchanged: the default clean block stays 32
+    assert len(build_golden(11, with_defects=False).rows[3:]) == 32
+
+
+def test_raised_n_clean_with_defects_is_rejected() -> None:
+    with pytest.raises(ValueError, match="pinned to the 32-case layout"):
+        build_golden(11, with_defects=True, n_clean=200)
 
 
 def test_defect_build_covers_every_planted_class() -> None:
