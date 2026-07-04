@@ -208,3 +208,36 @@ def test_malformed_reference_set_halts(tmp_path: Path, mutate: Any) -> None:
     mutate(reference)
     with pytest.raises(IntegrityHalt):
         build_reference_comparison(reference, _store(tmp_path), run_id="run-0006")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (lambda e: e.pop("comparison_id"), "comparison_id"),
+        (lambda e: e.update(comparison_id=""), "comparison_id"),
+        (lambda e: e.update(comparison_id=7), "comparison_id"),
+        (lambda e: e.pop("domain"), "domain"),
+        (lambda e: e.update(domain="astrology"), "domain"),
+        (lambda e: e.update(domain=3), "domain"),
+        (lambda e: e.pop("metric"), "metric"),
+        (lambda e: e.update(metric=""), "metric"),
+        (lambda e: e.update(metric=0.5), "metric"),
+    ],
+    ids=[
+        "missing_comparison_id",
+        "blank_comparison_id",
+        "nonstring_comparison_id",
+        "missing_domain",
+        "unsupported_domain",
+        "nonstring_domain",
+        "missing_metric",
+        "blank_metric",
+        "nonstring_metric",
+    ],
+)
+def test_malformed_entry_identity_halts_typed(tmp_path: Path, mutate: Any, field: str) -> None:
+    reference = _reference([_entry("C1", stat_id="structural.path.F3->F1", reference_value=0.5)])
+    mutate(reference["entries"][0])
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_reference_comparison(reference, _store(tmp_path), run_id="run-0007")
+    assert excinfo.value.details["field"] == field

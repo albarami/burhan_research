@@ -176,6 +176,49 @@ def test_doctored_playbook_floor_halts() -> None:
     assert "alternative" in excinfo.value.message
 
 
+@pytest.mark.parametrize(
+    "value",
+    [0, -1, True, 1.5, float("inf"), float("nan"), "one", None],
+    ids=["zero", "negative", "bool", "noninteger", "inf", "nan", "nonnumeric", "none"],
+)
+def test_doctored_alternative_floor_values_halt(value: Any) -> None:
+    class DoctoredPlaybook:
+        @staticmethod
+        def criteria(step_id: str) -> list[dict[str, Any]]:
+            if step_id == "PB-18":
+                return [{"name": "alternative_required", "value": value}]
+            return []
+
+    with pytest.raises(IntegrityHalt) as excinfo:
+        alternative_floor(DoctoredPlaybook())  # type: ignore[arg-type]
+    assert "at least 1" in excinfo.value.message
+
+
+def test_doctored_zero_floor_cannot_admit_empty_alternatives(tmp_path: Path) -> None:
+    # TC-12 / PB-18: >= 1 alternative model estimated and compared; a
+    # doctored floor of 0 must halt typed, never admit an empty comparison.
+    class ZeroFloorPlaybook:
+        @staticmethod
+        def criteria(step_id: str) -> list[dict[str, Any]]:
+            if step_id == "PB-18":
+                return [{"name": "alternative_required", "value": 0}]
+            return []
+
+    worker = _SequenceWorker([])
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_alternatives(
+            benchmark_frame(),
+            benchmark_config(),
+            playbook=ZeroFloorPlaybook(),  # type: ignore[arg-type]
+            rworker=worker,  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            call_id="alt-zero-floor",
+            alternatives=[],
+        )
+    assert "at least 1" in excinfo.value.message
+    assert worker.calls == []
+
+
 def test_achieved_power_report_flags_below_floor() -> None:
     # df = 50 (ex5.11 model), tiny N -> low close-fit power -> flagged.
     low = achieved_power_report(benchmark_config(), n=60, playbook=playbook())

@@ -90,6 +90,48 @@ def load_parity_map(data: Mapping[str, Any]) -> dict[str, Any]:
     return {"certified": scopes, "non_parity": [str(scope) for scope in non_parity]}
 
 
+def _validated_pair(entry: object, index: int) -> Mapping[str, Any]:
+    """FR-902 input integrity: one (engine, independent) estimate pair."""
+    if not isinstance(entry, Mapping):
+        halt(
+            IntegrityHalt(
+                "parity pair is not a mapping",
+                report={"index": index},
+            )
+        )
+    for field in ("scope", "id", "engine_value", "independent_value"):
+        if field not in entry:
+            halt(
+                IntegrityHalt(
+                    "parity pair lacks a required field",
+                    report={"index": index, "field": field},
+                )
+            )
+    for field in ("scope", "id"):
+        value = entry[field]
+        if not isinstance(value, str) or not value:
+            halt(
+                IntegrityHalt(
+                    f"parity pair {field} is not a non-empty string",
+                    report={"index": index, "field": field},
+                )
+            )
+    for side in ("engine_value", "independent_value"):
+        if not _is_finite(entry[side]):
+            halt(
+                IntegrityHalt(
+                    f"parity pair {side} is not a finite number",
+                    report={
+                        "index": index,
+                        "field": side,
+                        "scope": entry["scope"],
+                        "id": entry["id"],
+                    },
+                )
+            )
+    return entry
+
+
 def parity_check(
     pairs: Sequence[Mapping[str, Any]],
     *,
@@ -104,9 +146,10 @@ def parity_check(
     flags: list[str] = []
     declared_scopes: set[str] = set()
     halt_diffs: list[dict[str, Any]] = []
-    for entry in pairs:
-        scope = str(entry["scope"])
-        stat_id = str(entry["id"])
+    for index, raw in enumerate(pairs):
+        entry = _validated_pair(raw, index)
+        scope = entry["scope"]
+        stat_id = entry["id"]
         if scope in non_parity:
             if scope not in declared_scopes:
                 declared_scopes.add(scope)
@@ -122,14 +165,6 @@ def parity_check(
                     report={"scope": scope, "id": stat_id},
                 )
             )
-        for side in ("engine_value", "independent_value"):
-            if not _is_finite(entry.get(side)):
-                halt(
-                    IntegrityHalt(
-                        f"parity pair carries a nonfinite {side}",
-                        report={"scope": scope, "id": stat_id, "field": side},
-                    )
-                )
         tolerance = certified[scope]["tolerance"]
         delta = abs(float(entry["engine_value"]) - float(entry["independent_value"]))
         record = {

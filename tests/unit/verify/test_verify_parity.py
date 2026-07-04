@@ -172,3 +172,70 @@ def test_nonfinite_pair_value_halts() -> None:
             settings=_settings(),
         )
     assert "engine_value" in excinfo.value.message
+
+
+def test_nonmapping_pair_halts_typed() -> None:
+    with pytest.raises(IntegrityHalt) as excinfo:
+        parity_check(
+            [("structural.paths", "a.b.c", 0.1, 0.1)],  # type: ignore[list-item]
+            parity_map=_map(),
+            settings=_settings(),
+        )
+    assert "not a mapping" in excinfo.value.message
+    assert excinfo.value.details["index"] == 0
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (lambda p: p.pop("scope"), "scope"),
+        (lambda p: p.pop("id"), "id"),
+        (lambda p: p.pop("engine_value"), "engine_value"),
+        (lambda p: p.pop("independent_value"), "independent_value"),
+        (lambda p: p.update(scope=""), "scope"),
+        (lambda p: p.update(scope=7), "scope"),
+        (lambda p: p.update(id=""), "id"),
+        (lambda p: p.update(id=["a", "b"]), "id"),
+        (lambda p: p.update(engine_value="x"), "engine_value"),
+        (lambda p: p.update(engine_value=True), "engine_value"),
+        (lambda p: p.update(engine_value=float("nan")), "engine_value"),
+        (lambda p: p.update(engine_value=float("inf")), "engine_value"),
+        (lambda p: p.update(independent_value=None), "independent_value"),
+        (lambda p: p.update(independent_value=float("-inf")), "independent_value"),
+    ],
+    ids=[
+        "missing_scope",
+        "missing_id",
+        "missing_engine_value",
+        "missing_independent_value",
+        "blank_scope",
+        "nonstring_scope",
+        "blank_id",
+        "nonstring_id",
+        "nonnumeric_engine_value",
+        "bool_engine_value",
+        "nan_engine_value",
+        "inf_engine_value",
+        "none_independent_value",
+        "neginf_independent_value",
+    ],
+)
+def test_malformed_pair_halts_typed(mutate: Any, field: str) -> None:
+    entry = pair("structural.paths", "structural.path.F3->F1", 0.563, 0.5634)
+    mutate(entry)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        parity_check([entry], parity_map=_map(), settings=_settings())
+    assert excinfo.value.details["field"] == field
+    assert excinfo.value.details["index"] == 0
+
+
+def test_malformed_pair_in_non_parity_scope_still_halts() -> None:
+    # Shape validation precedes the declaration branch: a nonfinite value
+    # in a declared non-parity scope is a defect, not a declaration.
+    with pytest.raises(IntegrityHalt) as excinfo:
+        parity_check(
+            [pair("estimator.wlsmv", "a.b.c", float("nan"), 0.1)],
+            parity_map=_map(),
+            settings=_settings(),
+        )
+    assert excinfo.value.details["field"] == "engine_value"

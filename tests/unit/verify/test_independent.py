@@ -97,6 +97,65 @@ def test_engine_path_missing_from_independent_fit_halts() -> None:
     assert "independent fit lacks" in excinfo.value.message
 
 
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (lambda r: r.pop("paths"), "paths"),
+        (lambda r: r.update(paths={"lhs": "F3", "rhs": "F1", "est": 0.5}), "paths"),
+        (lambda r: r.update(paths=[["F3", "F1", 0.563]]), "paths"),
+        (lambda r: r["paths"][-1].pop("lhs"), "lhs"),
+        (lambda r: r["paths"][-1].pop("rhs"), "rhs"),
+        (lambda r: r["paths"][-1].pop("est"), "est"),
+        (lambda r: r["paths"][-1].update(lhs=3), "lhs"),
+        (lambda r: r["paths"][-1].update(rhs=None), "rhs"),
+        (lambda r: r["paths"][-1].update(est="bad"), "est"),
+        (lambda r: r["paths"][-1].update(est=True), "est"),
+        (lambda r: r["paths"][-1].update(est=float("nan")), "est"),
+        (lambda r: r["paths"][-1].update(est=float("inf")), "est"),
+    ],
+    ids=[
+        "missing_paths",
+        "nonlist_paths",
+        "nonmapping_row",
+        "missing_lhs",
+        "missing_rhs",
+        "missing_est",
+        "nonstring_lhs",
+        "nonstring_rhs",
+        "nonnumeric_est",
+        "bool_est",
+        "nan_est",
+        "inf_est",
+    ],
+)
+def test_malformed_structural_report_halts_typed(mutate: Any, field: str) -> None:
+    report = _engine_report()
+    mutate(report)
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_verification(
+            benchmark_frame(),
+            benchmark_config(),
+            report,
+            parity_map=load_parity_map(parity_map_data()),
+            policy=policy(),
+        )
+    assert excinfo.value.details["field"] == field
+
+
+def test_malformed_est_halt_names_the_path() -> None:
+    report = _engine_report()
+    report["paths"][-1]["est"] = "bad"
+    with pytest.raises(IntegrityHalt) as excinfo:
+        run_verification(
+            benchmark_frame(),
+            benchmark_config(),
+            report,
+            parity_map=load_parity_map(parity_map_data()),
+            policy=policy(),
+        )
+    assert excinfo.value.details == {"field": "est", "index": 2, "lhs": "F4", "rhs": "F3"}
+
+
 def test_independent_estimates_include_loadings() -> None:
     estimates = independent_estimates(benchmark_frame(), benchmark_config())
     # marker convention matches lavaan: y2 on F1 published 1.183

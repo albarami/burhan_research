@@ -98,6 +98,47 @@ def independent_estimates(frame: pd.DataFrame, config: StudyConfig) -> dict[str,
     return {"paths": paths, "loadings": loadings}
 
 
+def _validated_paths(structural_report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """FR-902 input integrity: the engine path rows this lane compares."""
+    paths = structural_report.get("paths")
+    if not isinstance(paths, list):
+        halt(
+            IntegrityHalt(
+                "structural report paths is not a list",
+                report={"field": "paths"},
+            )
+        )
+    for index, row in enumerate(paths):
+        if not isinstance(row, Mapping):
+            halt(
+                IntegrityHalt(
+                    "structural report path row is not a mapping",
+                    report={"field": "paths", "index": index},
+                )
+            )
+        for field in ("lhs", "rhs"):
+            if not isinstance(row.get(field), str):
+                halt(
+                    IntegrityHalt(
+                        f"structural report path {field} is not a string",
+                        report={"field": field, "index": index},
+                    )
+                )
+        if not _is_finite(row.get("est")):
+            halt(
+                IntegrityHalt(
+                    "structural report path est is not a finite number",
+                    report={
+                        "field": "est",
+                        "index": index,
+                        "lhs": row["lhs"],
+                        "rhs": row["rhs"],
+                    },
+                )
+            )
+    return paths
+
+
 def run_verification(
     frame: pd.DataFrame,
     config: StudyConfig,
@@ -108,10 +149,11 @@ def run_verification(
 ) -> dict[str, Any]:
     """FR-902: compare engine estimates against semopy within parity."""
     settings = verification_settings(policy)
+    paths = _validated_paths(structural_report)
     independent = independent_estimates(frame, config)
     pairs: list[dict[str, Any]] = []
-    for path in structural_report["paths"]:
-        key = (str(path["lhs"]), str(path["rhs"]))
+    for path in paths:
+        key = (path["lhs"], path["rhs"])
         if key not in independent["paths"]:
             halt(
                 IntegrityHalt(

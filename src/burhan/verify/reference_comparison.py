@@ -17,11 +17,13 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from burhan.core.artifacts.loader import validate_and_build
-from burhan.core.artifacts.models import ReferenceComparisonReport
+from burhan.core.artifacts.models import ComparisonDomain, ReferenceComparisonReport
 from burhan.core.errors import IntegrityHalt, halt
 
 if TYPE_CHECKING:
     from burhan.results.store import ResultsStore
+
+_SUPPORTED_DOMAINS = frozenset(domain.value for domain in ComparisonDomain)
 
 
 def _is_number(value: object) -> TypeGuard[int | float]:
@@ -68,6 +70,24 @@ def build_reference_comparison(
             "reference entry is not a mapping",
             {"block": "entries"},
         )
+        comparison_id = entry.get("comparison_id")
+        _require(
+            isinstance(comparison_id, str) and bool(comparison_id),
+            "reference entry comparison_id is not a non-empty string",
+            {"field": "comparison_id"},
+        )
+        domain = entry.get("domain")
+        _require(
+            isinstance(domain, str) and domain in _SUPPORTED_DOMAINS,
+            "reference entry domain is not a supported comparison domain",
+            {"comparison_id": comparison_id, "field": "domain"},
+        )
+        metric = entry.get("metric")
+        _require(
+            isinstance(metric, str) and bool(metric),
+            "reference entry metric is not a non-empty string",
+            {"comparison_id": comparison_id, "field": "metric"},
+        )
         stat_id = entry.get("stat_id")
         _require(
             isinstance(stat_id, str) and bool(stat_id),
@@ -83,9 +103,9 @@ def build_reference_comparison(
         burhan_value = store.resolve(str(stat_id)).value
         reference_value = entry.get("reference_value")
         comparison: dict[str, Any] = {
-            "comparison_id": str(entry["comparison_id"]),
-            "domain": str(entry["domain"]),
-            "metric": str(entry["metric"]),
+            "comparison_id": comparison_id,
+            "domain": domain,
+            "metric": metric,
             "burhan_value": burhan_value,
             "burhan_stat_id": str(stat_id),
         }

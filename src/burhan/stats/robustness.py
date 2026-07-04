@@ -36,17 +36,22 @@ def _is_number(value: object) -> TypeGuard[int | float]:
 
 
 def alternative_floor(playbook: Playbook) -> int:
-    """PB-18: the governed minimum number of alternative models."""
+    """PB-18: the governed minimum number of alternative models (>= 1)."""
     for criterion in playbook.criteria("PB-18"):
         if criterion.get("name") != "alternative_required":
             continue
         value = criterion.get("value")
-        if not _is_number(value) or not math.isfinite(value) or int(value) != value:
+        if (
+            not _is_number(value)
+            or not math.isfinite(value)
+            or int(value) != value
+            or int(value) < 1
+        ):
             break
         return int(value)
     halt(
         IntegrityHalt(
-            "PB-18 does not state an integer alternative floor",
+            "PB-18 does not state an integer alternative floor of at least 1",
             report={"step": "PB-18", "criterion": "alternative_required"},
         )
     )
