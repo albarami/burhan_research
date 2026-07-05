@@ -1,188 +1,198 @@
-# TC-16 — PLAN v1 (live-run execution path, M6 enablement)
+# TC-16 — PLAN v2 (live-run execution path, M6 enablement)
 
-> **For the reviewer:** PLAN v1 only — no implementation. Per the issuance
-> instruction, this plan maps AT-M16-1..8 to concrete tests and names the exact
-> files, **and** surfaces open questions / contract conflicts. One genuine
-> conflict was found (§4 Q-A). Per the standing rule ("if any are found, STOP
-> rather than proposing implementation around them"), this plan **STOPS** on the
-> run-model design and does **not** propose an implementation for the paused
-> run; it requests a ruling. The tractable parts are mapped so the ruling has
-> full context.
+> **PLAN v2 — supersedes v1 (`7593c0a`) per the reviewer ruling on Q-A.** No
+> implementation. v1 STOPPED on the pause/orchestrator question; the ruling
+> resolved it: architecture permits interactive input **before/at G1**
+> (`03_ARCHITECTURE.md:103` — "interactive input is possible only before/at G1
+> (optional contract glance); from G1-pass to terminal state the orchestrator
+> exposes no input channel"). The real constraints are **no stdin, no in-DAG
+> human input, no partial resume**. This plan adopts the ruled **pre-DAG
+> extraction + confirmation** model, maps AT-M16-1..8 fully (none blocked), and
+> names the reference-comparison entrypoint exactly.
 
 **Contract:** TC-16 (ISSUED @ `ea46606`). **Branch:** `tc/tc-16-live-run`.
-**Deliverable:** live-provider `burhan run` assembled over existing components.
-**Read first (done):** CLAUDE.md; TC-16.md; `docs/03_ARCHITECTURE.md` §4/§5/§9/§11;
-`src/burhan/core/orchestrator.py`; `src/burhan/cli/certification.py`;
-`src/burhan/stages/registry.py`; `src/burhan/stages/stage_1a.py` (Contract/Gate1);
-`src/burhan/contract/llm_base.py`; `src/burhan/contract/node_a.py` (surface).
 
-## 1. Scope walls (restated — these are invariants of every task below)
+## 1. The run model (per ruling)
 
-- No new statistics; no Stage-1A statistical drift (adapters/orchestration only).
-- Certification stays canned/offline — unchanged and proven by test.
-- Raw CSV never reaches an LLM (existing allowlist enforced on the live path).
-- Pause-before-Gate-1 un-bypassable.
-- Live LLM calls archived; rerun replays archives (NFR-101).
-- Secrets never enter manifests, logs, or committed files.
+Two CLI invocations, no shared/partial run, no new terminal state:
 
-## 2. Read-first component map (reuse — do not rebuild)
+- **Invocation 1 — `burhan run <study> --live` (extract, pre-DAG).** DOCX→text →
+  live Node A extraction → write `config/study_config.yaml` into the bundle →
+  archive Node A prompt+response → write a **pending-glance token** binding the
+  config hash + Node A archive hash. Not an `Orchestrator.run`: no run dir, no
+  stage, no stdin, exits informationally. The researcher then glances at
+  `config/study_config.yaml`.
+- **Invocation 2 — `burhan run <study> --live --confirm` (confirmed run).** Verify
+  the token against the *current* config + archive hashes (absent/mismatch →
+  `IntegrityHalt`, **no Gate 1, no Stage-1A**). Then run the **existing full
+  `Orchestrator.run`** over the production registry, with **Node A = replay of the
+  archive** and **Node C = live+archived**. COMPLETED via the existing states.
+- **`burhan rerun <run-dir> --live`.** Rebuild the registry with **both** nodes as
+  replay (read run-dir archives); **no provider calls**; `Orchestrator.rerun`
+  asserts byte-identity (NFR-101).
 
-Everything TC-16 lists as "existing components" was verified present:
+## 2. Pending-glance artifact/token location (reviewer's explicit question)
 
-| Capability | Exists at | Reuse / build |
+**Decision: a separate write-once pending area — NOT inside the eventual run
+directory.** Reasoning, tied to the invariants:
+
+- Invocation 1 is pre-DAG and creates **no** run dir (the run dir is created and
+  **sealed by invocation 2's single `Orchestrator.run`**). Putting inv-1 outputs
+  in the run dir and continuing in inv-2 would be **partial resume (AD-03)** and
+  would split the seal across two invocations — both forbidden.
+- Pending area: `$BURHAN_STUDIES_DIR/<study>/extract/` (write-once) holding the
+  **Node A archive** (`node_a.0.json`) and **`GLANCE_TOKEN.json`**
+  (`{study_id, config_sha256, node_a_archive_sha256, extracted_at}`).
+  `config/study_config.yaml` is written to the bundle `config/` (the glance target).
+- At **confirm**, invocation 2 **copies** the Node A archive into
+  `runs/<id>/llm/node_a.0.json` so it is a run-dir artifact — hashed into the seal
+  hash-tree (`manifest.py:59-82`) and compared by `rerun` (`orchestrator.py:224-240`).
+- **Preserves:** manifest sealing (one `Orchestrator.run` owns the run dir),
+  archive hashing (archive lives in the run dir → in `seal.hash_tree_root`), rerun
+  identity (rerun reads the run dir only; the pending area is transient
+  scaffolding it never touches).
+- The token binds the config + archive hashes, so the run reproduces **exactly**
+  what was glanced; a post-glance edit to `config/study_config.yaml` changes its
+  hash → token invalid → refuse (the glance is read-only; changes require
+  re-extraction). Un-bypassable (AT-M16-3).
+
+## 3. Read-first component map (reuse — sourced)
+
+| Capability | Exists at | Use |
 |---|---|---|
-| Full-DAG run, seal, terminal states | `core/orchestrator.py:112-193` (`run`) | **reuse** |
-| Full re-exec + byte-identity assertion | `core/orchestrator.py:195-241` (`rerun`) | **reuse** |
-| Node A extraction (documents→config) | `stages/stage_1a.py:206-210` (Contract) → `contract/node_a.py:61` (`NodeA.extract`) | **reuse** |
-| Node C Gate 1 audit | `stages/stage_1a.py:224-236` (Gate1) → `review/node_c.py` (`gate1`) | **reuse** |
-| Registry wiring (nodes injected) | `stages/registry.py:41-80` (`production_registry`) | **reuse** |
-| Real provider clients (network edge) | `contract/llm_base.py:249-292` (`resolve_provider_call`) | **reuse** |
-| Real `llm.yaml` load + lineage check | `contract/llm_base.py:71-161` (`load_llm_settings`) | **reuse** |
-| Raw-data boundary rejection (NFR-401) | `contract/llm_base.py:164-203` (`screen_boundary_input`) | **reuse** |
-| Canned offline path to parallel | `cli/certification.py` (`certification_run`/`_build_registry`) | **parallel, don't touch** |
-| Manifest hashes + seal | `core/manifest.py` | **reuse + extend fields** |
-| Provenance (sanad) log | `core/provenance.py` | **reuse** |
-| Reference-comparison builder (TC-12) | `verify/reference_comparison.py` | **reuse** (M6 step; entrypoint to confirm at impl) |
+| Full-DAG run/seal/states | `core/orchestrator.py:112-193` | reuse (invocation 2) |
+| Full re-exec + byte-identity | `core/orchestrator.py:195-241` | reuse (rerun) |
+| Deterministic sealed clock | `cli/certification.py:48-68` (`_SealedClock`) | reuse (live run + rerun) |
+| Node A extract (YAML resp → StudyConfig, V-checks) | `contract/node_a.py:61-108`; `stages/stage_1a.py:206-210` | reuse |
+| Node C Gate 1 | `stages/stage_1a.py:224-236`; `review/node_c.py` | reuse |
+| Registry (nodes injected) | `stages/registry.py:41-80` | reuse |
+| Real clients / settings / boundary | `contract/llm_base.py:249-292`, `:71-161`, `:164-203` | reuse |
+| Manifest seal = whole-tree hash | `core/manifest.py:59-82,130-146` | reuse (archives hashed by seal) |
+| Reference-comparison builder | `verify/reference_comparison.py:38` (`build_reference_comparison`) | reuse |
+| Canned offline path (parallel, untouched) | `cli/certification.py` | do not modify |
 
-**To build (assembly + I/O only):** a DOCX→text util; a live-run orchestration
-module (parallel to `cli/certification.py`); an LLM archive/replay layer; CLI
-routing for the live path; manifest-field extensions. **None of these adds
-statistics or governance.**
+**Build (assembly/plumbing only):** `contract/documents.py` (DOCX→text);
+`contract/archive.py` (record/replay `provider_call` + archive read/write);
+`cli/live.py` (`live_extract` / `live_confirm` / `live_rerun`); `cli/__init__.py`
+routing; `render_reference_comparison_md` in `verify/reference_comparison.py`.
+**No** statistics, **no** certification change, **no** governed-doc/schema edit.
 
-## 3. DOCX→text ingestion design (AT-M16-7)
+## 4. DOCX→text ingestion (AT-M16-7)
 
-- **New:** `src/burhan/contract/documents.py` — `document_to_text(path: Path) -> str`
-  using `python-docx` (locked: `pyproject.toml`, `uv.lock`). Extracts paragraph +
-  table text in document order; returns a single string.
-- The study DOCX → `study_document` text; the survey-instrument DOCX →
-  `data_dictionary` text. Both are the **text** inputs `NodeA.extract` already
-  accepts (`node_a.py:61`); they pass through `screen_boundary_input` unchanged.
-- **Halt behaviour:** a corrupt/unreadable DOCX raises a typed `IntegrityHalt`
-  (never silently empty) — `screen_boundary_input` already rejects non-text, and
-  the util raises before returning empty.
-- **Raw CSV is NOT a document** — it stays ordinary pipeline data read by the
-  `Ingest`/`Prep` stages (`stage_1a.py:180-189`); it is never handed to
-  `document_to_text` and never to an adapter.
+`contract/documents.py`: `document_to_text(path: Path) -> str` via `python-docx`
+(locked). Paragraphs + table cells in document order → one string. The study DOCX
+→ `study_document`; the instrument DOCX → `data_dictionary`. A corrupt/unreadable
+DOCX raises typed `IntegrityHalt` (never silently empty). The raw CSV is **not** a
+document — it is read only by `Ingest`/`Prep` (`stage_1a.py:180-189`) and by
+`validate_contract` (path, deterministic); it never reaches `document_to_text` or
+an adapter.
 
-## 4. Open questions & contract conflicts — **STOP HERE**
+## 5. Archive & replay (AT-M16-5, NFR-101)
 
-### Q-A (CONTRACT CONFLICT — blocks the run-model): the un-bypassable pause vs. the orchestrator's governed invariants
+`contract/archive.py`:
+- `recording_provider_call(inner, archive_dir, node, seq) -> Callable[[str],str]` —
+  wraps a real `resolve_provider_call`; on call, invokes `inner(prompt)`, writes
+  write-once `{"prompt":…, "response":…}` to `archive_dir/<node>.<seq>.json`,
+  returns the response.
+- `replay_provider_call(archive_dir, node, seq) -> Callable[[str],str]` — returns
+  the archived `response`; **never** calls a provider; a missing/mismatched archive
+  → typed halt (caught by the rerun identity assertion for AT-M16-5's planted
+  mismatch).
+- Archive content is prompt+response **text** and model IDs only — **no keys**.
+Because archives are run-dir artifacts written once and replayed verbatim, the
+regenerated tree is byte-identical and `seal.hash_tree_root` matches on rerun.
 
-**Finding.** `Contract` (Node A) and `Gate1` (Node C) are **adjacent stages inside
-the single monolithic `Orchestrator.run` loop** (`registry.py:63-64`;
-`orchestrator.py:131-187`). TC-16 item 5 + AT-M16-3 require the run to **halt after
-Node A extraction/write-back and refuse to reach Gate 1 without an explicit
-researcher confirmation token**. But the orchestrator, by governed design:
+## 6. Manifest & hashing (AT-M16-6) — no schema change
 
-- "**exposes no input channel: nothing here reads stdin, ever (FR-306/FR-1401 —
-  proven by the closed-stdin acceptance test)**" — `orchestrator.py:12-13`
-  (test: `tests/unit/orchestrator/test_state_machine.py`);
-- performs **no partial resume** — AD-03 (`03_ARCHITECTURE.md:21`): "resume logic
-  is the enemy of bit-identical reproducibility (NFR-101)";
-- `rerun` re-executes the **full** DAG and asserts byte-identity of every artifact
-  (`orchestrator.py:195-241`, NFR-101).
+The manifest schema is closed (`additionalProperties:false`), and TC-16 forbids
+governed edits — so we use **existing** slots:
+- `hashes.study_config` = sha256 of the persisted `config/study_config.yaml`
+  (existing field; set as `certification.py:198-204` already does).
+- `llm_nodes.node_a/b/c.model` = real `llm.yaml` model IDs (existing fields).
+- **Archived responses** are hashed into the manifest **via the seal hash-tree**
+  (`manifest.py:59-82`) — they are run-dir files, so no dedicated `hashes.*` key
+  (and no schema change) is needed. Keys appear in neither manifest, logs, nor
+  archives.
 
-An in-DAG pause between `contract` and `gate1` therefore **contradicts FR-306/FR-1401
-(no input channel) and AD-03 (no partial resume)**, and the resolution changes the
-governed run-state model (`03_ARCHITECTURE.md:81-101` fixes contract=S1, gate1=G1
-as consecutive DAG stages with states `PENDING→RUNNING→COMPLETED`).
+## 7. Reference comparison (TC-16 item 10) — exact names
 
-**Why I am stopping.** Making the pause work requires a run-model decision that
-edits or reinterprets governed invariants — e.g. splitting the live run into two
-orchestrated invocations (extract-phase halting at a **new** boundary state, then
-a separate confirm-invocation), or moving live extraction to a pre-DAG step. Each
-choice has different consequences for: the fixed DAG (arch §4), the run-state
-enum, the seal/manifest, and how `rerun` (full re-exec) preserves byte-identity
-across a paused→resumed run. **This is a governed-architecture decision, not an
-implementer choice.** Picking one and writing tasks around it would violate the
-scope wall and the standing "STOP, don't plan around conflicts" rule. **I need a
-ruling before designing or implementing the paused run path.**
+- **Builder (exists, reuse):** `build_reference_comparison(reference, store, *,
+  run_id) -> dict` at `verify/reference_comparison.py:38`; test
+  `tests/unit/verify/test_reference_comparison.py`. Emits the schema-valid
+  `ReferenceComparisonReport` **JSON** (status/classification per the §3.1
+  tolerances; domains = `ComparisonDomain`, `models.py:588-604`).
+- **Renderer (new, item 10):** `render_reference_comparison_md(report: Mapping) ->
+  str` added to `verify/reference_comparison.py` — pure markdown projection of the
+  report (summary + per-comparison rows), **no statistics**. `live_confirm` writes
+  it to `runs/<id>/REFERENCE_COMPARISON.md` when a reference set is supplied.
+- **New test:** `tests/unit/verify/test_reference_comparison.py::
+  test_render_reference_comparison_md` — asserts the md contains the summary
+  counts and one row per comparison, and is a pure function of the report.
+  (Item 10 has no binding AT-M16; it is exercised end-to-end during M6.)
 
-*(Decision surface for the ruling — stated, not chosen: does the pause resolve as
-(i) a two-invocation extract→confirm run with a new terminal state, (ii) a pre-DAG
-extraction step feeding an unchanged full-DAG run, or (iii) a governed change to
-the orchestrator's input/resume invariants? Each needs a governed-doc position on
-FR-306/AD-03/NFR-101 and the run-state model.)*
+## 8. AT-M16-1..8 — full mapping (TDD; none blocked)
 
-### Q-B (depends on Q-A): rerun replay shape
-
-Archival/replay (§5) is designable at the mechanism level, but whether `rerun`
-replays **one** sealed run or **two** phases depends entirely on Q-A's run-model.
-Blocked until Q-A is ruled.
-
-### Q-C (needs confirmation): study_config write-back target
-
-Certification seeds Node A's echo by reading `study_dir/config/study_config.yaml`
-(`certification.py:158`); the live path has **no** pre-existing config — Node A
-produces it. TC-16 item 4 says "persist into the bundle's `config/`". Confirm:
-write-back target = `$BURHAN_STUDIES_DIR/<study>/config/study_config.yaml`
-(engine-external, FR-1402), and the manifest hashes the **produced** bytes
-(`hashes.study_config`). Interacts with Q-A (when write-back happens relative to
-the pause).
-
-### Q-D / Q-E (design detail, resolvable — not blockers): `llm.yaml` staging location + which model IDs govern the live M6 run (manifest records model IDs, never keys); `data_dictionary` DOCX selection when multiple DOCX are staged.
-
-## 5. Archival & replay mechanism (NFR-101) — mechanism explicit; final shape pending Q-A/Q-B
-
-**Mechanism (independent of the pause):** on a **live** run, each adapter
-`provider_call` is wrapped to (1) call the real client
-(`resolve_provider_call`, `llm_base.py:249-292`), (2) write the exact
-prompt+response to a write-once archive inside the sealed run dir
-(e.g. `runs/<id>/llm/<node>.<seq>.json`). On **rerun**, the registry is rebuilt
-(as `certification_rerun` already rebuilds it, `certification.py:209-227`) with a
-**replay** `provider_call` that reads `<node>.<seq>.json` and returns the archived
-response — **no network**. Because the archive is written once and replayed
-verbatim, the regenerated archive is byte-identical and the existing
-`rerun` identity assertion (`orchestrator.py:224-240`) holds. A planted archive
-mismatch is caught by that same assertion (AT-M16-5). Keys never enter the archive
-or manifest (only prompt/response text + model IDs).
-
-**Blocked aspect:** if Q-A yields a two-phase run, "the sealed run dir" and "what
-rerun replays" span two invocations — that boundary must be defined first.
-
-## 6. AT-M16 → test/file mapping
-
-**Tractable now (independent of Q-A):**
-
-| AT | Test (new unless noted) | Files under test |
+| AT | Test (RED→GREEN) | Files under test |
 |---|---|---|
-| AT-M16-2 (certification unchanged) | `tests/integration/test_it6_cli_certification.py` (existing, stays green) + new assertion that `certification_run` still injects canned `lambda` nodes & no network | `cli/certification.py` (unchanged) |
-| AT-M16-4 (no raw data to LLM) | new `tests/unit/contract/test_live_boundary.py` — CSV path/bytes/dataframe rejected on the live `provider_call` path | `contract/llm_base.py` (reuse), live module |
-| AT-M16-7 (DOCX ingestion) | new `tests/unit/contract/test_documents.py` — DOCX→text yields Node A input; corrupt DOCX → typed halt | `contract/documents.py` (new) |
-| AT-M16-8 (no Stage-1A drift) | whole existing unit+golden+benchmark+integration suite stays green (CI) | none changed in `stats/`/`prep/`/`verify/` |
+| **AT-M16-1** live path real | `tests/integration/test_it7_live_run.py::test_live_extract_then_confirm_reaches_completed` — fixture study (tiny DOCX+CSV) + a **recording non-canned** provider stub; inv1 drives DOCX→NodeA(stub records)→config+archive+token, inv2 replays NodeA + Node C(stub records)→full DAG→COMPLETED; assert the stub **was invoked** (not the canned echo) | `cli/live.py`, `contract/documents.py`, `contract/archive.py`, `cli/__init__.py` |
+| **AT-M16-2** cert unchanged | existing `tests/integration/test_it6_cli_certification.py` stays green + `tests/unit/cli/test_certification_canned.py::test_certification_still_canned_no_network` (asserts `certification_run` injects `lambda` nodes, no client) | `cli/certification.py` (unchanged) |
+| **AT-M16-3** pause un-bypassable | `test_it7_live_run.py::test_confirm_without_token_halts_before_gate1` and `::test_confirm_with_tampered_config_halts` — no token / hash mismatch ⇒ `IntegrityHalt`, **no run dir, no Node C call, no stage executed** | `cli/live.py` (token check) |
+| **AT-M16-4** no raw data to LLM | `tests/unit/contract/test_live_boundary.py::test_csv_never_reaches_adapter` — CSV path/bytes/dataframe rejected by `screen_boundary_input` on the live path; `export_path` goes to `validate_contract`, never to `provider_call` | `contract/llm_base.py` (reuse), `cli/live.py` |
+| **AT-M16-5** rerun replay identity | `test_it7_live_run.py::test_rerun_replays_archives_byte_identical` (provider stub **raises if called**; artifacts byte-identical) + `::test_planted_archive_mismatch_is_caught` | `cli/live.py` (`live_rerun`), `contract/archive.py` |
+| **AT-M16-6** write-back + manifest | `test_it7_live_run.py::test_writeback_and_manifest_hashes` — `hashes.study_config` = persisted config sha; `llm_nodes.*.model` = llm.yaml model IDs; archives in `seal.hash_tree_root`; **no key** in manifest/logs | `cli/live.py`, `core/manifest.py` (reuse) |
+| **AT-M16-7** DOCX ingestion | `tests/unit/contract/test_documents.py::test_docx_to_text` and `::test_corrupt_docx_halts_typed` | `contract/documents.py` |
+| **AT-M16-8** no Stage-1A drift | whole prior unit+golden+benchmark+integration suite green in CI; grep-assert no diff under `stats/`,`prep/`,`verify/` stat modules | none in Stage-1A modules |
 
-**Blocked pending Q-A ruling (run-model dependent):**
+**Fixtures:** `tests/integration/live_fixture/` — a tiny valid DOCX (built with
+`python-docx` in a fixture helper), a 3-row CSV, a fixture `llm.yaml`, and a
+recording/replay provider stub returning a fixed valid Node A YAML + Node C
+`approve`. The stub is **non-canned** (records calls, distinct from
+`certification_run`'s lambdas) so AT-M16-1 proves the live wiring.
 
-| AT | Why blocked |
-|---|---|
-| AT-M16-1 (live path real, drives to COMPLETED) | the end-to-end path includes the pause; its shape is Q-A |
-| AT-M16-3 (pause un-bypassable) | **is** the Q-A conflict |
-| AT-M16-5 (rerun replay identity) | replay span depends on Q-A/Q-B run-model |
-| AT-M16-6 (write-back + manifest) | write-back timing relative to the pause is Q-A/Q-C |
+## 9. File-by-file change list
 
-**Proposed new files (shape confirmed only after Q-A):** `cli/live.py` (live_run /
-live_rerun orchestration, parallel to `cli/certification.py`); archive/replay
-helper (module TBD by Q-A); `cli/__init__.py` `run` routing (currently refuses at
-`cli/__init__.py:41-45`); manifest-field extension for archive + `llm.yaml` model
-IDs.
+**Create:** `src/burhan/contract/documents.py`; `src/burhan/contract/archive.py`;
+`src/burhan/cli/live.py`; tests `test_it7_live_run.py`, `test_documents.py`,
+`test_live_boundary.py`, `test_certification_canned.py`, `test_archive.py`,
+`live_fixture/` helpers.
+**Modify:** `src/burhan/cli/__init__.py` (`run` routes `--live`/`--live --confirm`
+to `live_extract`/`live_confirm`; `rerun` routes `--live` to `live_rerun`;
+non-`--live`/non-`--certification` still refuses); `verify/reference_comparison.py`
+(+`render_reference_comparison_md`); `tests/unit/verify/test_reference_comparison.py`
+(+md test).
+**Untouched (walls):** all of `stats/`, `prep/`, `verify/` stat logic,
+`stages/stage_1a.py` internals, `cli/certification.py`, every schema, playbook,
+policy, registry.
 
-## 7. Muhasabah self-audit
+## 10. TDD order (one PR, standards §6)
 
-- **Provenance:** every "exists" claim cites `file:line`; the one unread interface
-  (`verify/reference_comparison.py` entrypoint) is flagged "to confirm", not asserted.
-- **Assumptions:** Q-A's contradiction is inference from `orchestrator.py:12-13` +
-  `registry.py:63-64` + AD-03 — labelled as the finding, with sources.
-- **Fabrication:** no run was executed; no data read; no run-model chosen.
-- **Requirements:** maps AT-M16-1..8, names files, states walls, includes DOCX and
-  archival/replay designs, surfaces open questions — and STOPS on the conflict
-  rather than planning around it, as instructed.
-- **Reversibility:** this is a plan doc; the STOP prevents premature `src/` work.
-- **Gate verdict: PASS** — with the explicit STOP on Q-A.
+1. `documents.py` (AT-M16-7) · 2. `archive.py` (record/replay unit) · 3.
+`test_live_boundary` (AT-M16-4) · 4. `live_extract` + token (AT-M16-1 inv1, -3) ·
+5. `live_confirm` replay+live-C (AT-M16-1 inv2, -6) · 6. `live_rerun` (AT-M16-5) ·
+7. cert-canned guard (AT-M16-2) · 8. reference md renderer (item 10) · 9. whole
+suite + CI (AT-M16-8). Each step: failing test first, minimal code, gates green.
 
-## 8. Requested ruling (before PLAN v2 / any implementation)
+## 11. Muhasabah self-audit
 
-A governed position on **Q-A** (the pause vs. FR-306/FR-1401/AD-03/NFR-101 and the
-run-state model), which unblocks Q-B/Q-C. Q-D/Q-E can be answered alongside or at
-implementation. On the ruling I produce PLAN v2 (task-level TDD for AT-M16-1..8) or,
-if Q-A needs a governed-doc change, escalate per change control first. **Holding —
-no implementation.**
+- **Provenance:** every reuse point cites `file:line`; the ruling cites
+  `03_ARCHITECTURE.md:103`; the manifest/seal claim cites `manifest.py:59-82`.
+- **Assumptions:** archive = raw Node A YAML response (`node_a.py:70-80`), replayed
+  verbatim — stated, sourced.
+- **Fabrication:** none — no run executed, no data read; the reference-comparison
+  entrypoint is named from the file, and the missing `.md` renderer is called out
+  as new (not asserted to exist).
+- **Requirements:** all AT-M16-1..8 mapped with files+tests, **none blocked**; the
+  pending-area question answered; DOCX and archive/replay designs explicit;
+  reference-comparison function+test named. No scope creep (no stats, no cert
+  change, no governed edit).
+- **Walls:** no stdin, no in-DAG input, no partial resume, raw CSV never to an LLM,
+  pause un-bypassable, rerun replays archives, secrets never in
+  manifest/logs/commits — each mapped to a test above.
+- **Gate verdict: PASS.**
+
+## 12. Hold
+
+PLAN v2 complete. **Pausing for review — no implementation.** On approval I
+implement test-first in the §10 order on `tc/tc-16-live-run`, gates green per
+commit, then submit for the TC-16 verdict. M6 stays held until TC-16 is APPROVED,
+merged, ledger-recorded, and CI-green.
