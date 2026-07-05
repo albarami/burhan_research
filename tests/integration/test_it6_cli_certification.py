@@ -17,6 +17,8 @@ keeps both probes fast without exposing a policy flag on the command.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,12 @@ from typer.testing import CliRunner
 from burhan.cli import app
 
 runner = CliRunner()
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _write_study_bundle(tmp_path: Path, *, n: int = 300) -> Path:
@@ -56,6 +64,14 @@ def test_run_command_reaches_completed_via_cli(tmp_path: Path) -> None:
     result = runner.invoke(app, ["run", "--certification", str(study_dir)])
     assert result.exit_code == 0, result.output
     assert "COMPLETED" in result.output
+    # NFR-102: the manifest records the ACTUAL sources this run consumed — the
+    # study's own config bytes and the loaded (monkeypatched fast) policy hash —
+    # not the governed template that an injected policy would never match.
+    run_dir = next(iter(sorted((study_dir / "runs").glob("*"))))
+    hashes = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))["hashes"]
+    assert hashes["study_config"] == _sha(study_dir / "config" / "study_config.yaml")
+    assert hashes["decision_policy"] == fast_policy(tmp_path).sha256
+    assert hashes["decision_policy"] != _sha(_ROOT / "policy" / "decision_policy.template.yaml")
 
 
 def test_rerun_command_is_byte_identical_via_cli(tmp_path: Path) -> None:

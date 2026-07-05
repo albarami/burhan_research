@@ -119,7 +119,9 @@ def _node_manifest(*, provider: str, lineage: str) -> dict[str, Any]:
     }
 
 
-def _manifest_fields(config: StudyConfig, run_id: str, *, study_config_sha: str) -> dict[str, Any]:
+def _manifest_fields(
+    config: StudyConfig, run_id: str, *, study_config_sha: str, decision_policy_sha: str
+) -> dict[str, Any]:
     node_a = _node_manifest(provider="anthropic", lineage="anthropic.claude")
     node_c = _node_manifest(provider="openai", lineage="openai.gpt")
     prompt = {"version": "1.0", "sha256": "0" * 64}
@@ -129,8 +131,11 @@ def _manifest_fields(config: StudyConfig, run_id: str, *, study_config_sha: str)
         "master_seed": _MASTER_SEED,
         "engine": {"version": "0.1.0", "git_commit": "0000000", "git_dirty": False},
         "hashes": {
-            "study_config": study_config_sha,  # the study's own config bytes (REJECT fix 3)
-            "decision_policy": _sha256(governance_dir() / _POLICY),
+            # Each hash is the actual source consumed by the run (NFR-102): the
+            # study's own config bytes and the loaded Policy's own hash — never
+            # the governed template, which an injected policy would not match.
+            "study_config": study_config_sha,
+            "decision_policy": decision_policy_sha,
             "protected_registry": _sha256(governance_dir() / _REGISTRY),
             "playbook": _sha256(playbooks_dir() / _PLAYBOOK),
             "prompts": {"node_a": prompt, "node_b": prompt, "node_c": prompt},
@@ -192,7 +197,12 @@ def certification_run(
     registry, config = _build_registry(study_dir, the_policy, montecarlo_replications)
     study_config_sha = _sha256(study_dir / "config" / "study_config.yaml")
     run_id = _run_id(base)
-    fields = _manifest_fields(config, run_id, study_config_sha=study_config_sha)
+    fields = _manifest_fields(
+        config,
+        run_id,
+        study_config_sha=study_config_sha,
+        decision_policy_sha=the_policy.sha256,  # the loaded policy, not the template (NFR-102)
+    )
     return Orchestrator(sealed).run(study_dir / "runs" / run_id, registry, manifest_fields=fields)
 
 
