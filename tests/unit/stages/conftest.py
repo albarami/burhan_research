@@ -9,6 +9,8 @@ for _path in (
     str(_ROOT / "src"),
     str(_ROOT / "tests" / "unit" / "stages"),
     str(_ROOT / "tests" / "unit" / "orchestrator"),
+    str(_ROOT / "tests" / "golden"),
+    str(_ROOT / "tests" / "integration"),
 ):
     if _path not in sys.path:
         sys.path.insert(0, _path)
