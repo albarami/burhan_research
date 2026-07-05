@@ -30,6 +30,6 @@ Single source of progress truth (10_PROJECT_PLAN.md). One line per verdict; APPR
 
 | Gate | Date | Signed by | Evidence |
 |---|---|---|---|
-| M5 certification | — | — | 11_CERTIFICATION_PLAN execution report |
+| M5 certification | 2026-07-05 | Researcher (Salim Al Barami) | CERTIFICATION_REPORT.md GATE PASS @ 20da2db |
 | M6 DBA validation | — | — | reference comparison, unresolved = 0 |
 | M7 go-live | — | — | 14_GO_LIVE_CHECKLIST executed |
