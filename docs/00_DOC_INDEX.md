@@ -29,7 +29,7 @@ Status legend: ✅ approved · ⬜ to produce · 🔒 user-supplied input
 | # | Document | Purpose | Status |
 |---|---|---|---|
 | 08 | `docs/08_BUILD_SPEC.md` | Phase 1 Build Specification: module decomposition (10–14 modules), module interfaces, 1A → 1B execution order, per-module acceptance tests. The master document Codex directs from. | ✅ |
-| 09 | `docs/09_task_contracts/` | One work order per module (TC-01…TC-14), plus **TC-15** (researcher-authored M5 C4 remediation: production pipeline wiring): scope, inputs/outputs, acceptance criteria, test requirements, dependencies. The unit Codex issues and signs off against. | ✅ |
+| 09 | `docs/09_task_contracts/` | One work order per module (TC-01…TC-14), plus **TC-15** (researcher-authored M5 C4 remediation: production pipeline wiring) and **TC-16** (researcher-authored M6 live-run enablement: the live-provider execution path): scope, inputs/outputs, acceptance criteria, test requirements, dependencies. The unit Codex issues and signs off against. | ✅ |
 | 10 | `docs/10_PROJECT_PLAN.md` | Milestones M0–M7 (scaffold → contracts → prep core → measurement → structural/effects → reporting layer → certification → DBA validation), dependency map, definition-of-done per milestone. | ✅ |
 | 15 | `docs/15_ENGINEERING_STANDARDS.md` | Coding standards (Python + R), typing/docstring rules, test conventions, git branch/commit discipline, review workflow mechanics. | ✅ |
 | — | `CLAUDE.md` (repo root) | Standing instructions for Claude Code: role, what it may/may not decide, how to consume task contracts, test-first rules, where outputs go. | ✅ |
