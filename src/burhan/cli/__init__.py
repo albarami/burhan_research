@@ -48,15 +48,45 @@ def _refuse_if_stages_missing() -> None:
 
 
 @app.command()
-def run(study_dir: Path) -> None:
+def run(
+    study_dir: Path,
+    certification: bool = typer.Option(
+        False, "--certification", help="offline certified-workstation dry run (TC-15/M5, D2)"
+    ),
+) -> None:
     """Execute a full study run from a study directory (headless after Gate 1)."""
-    _refuse_if_stages_missing()
+    if not certification:
+        typer.echo(
+            "no run: real-provider study runs land with a later contract; pass "
+            "--certification for the offline certified-workstation dry run (D2)."
+        )
+        raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
+    from burhan.cli.certification import certification_run
+
+    result = certification_run(study_dir)
+    typer.echo(f"run terminal state: {result.state} ({result.run_dir})")
+    raise typer.Exit(code=EXIT_BY_STATE.get(result.state, EXIT_BY_STATE["HALTED_INTEGRITY"]))
 
 
 @app.command()
-def rerun(run_dir: Path) -> None:
+def rerun(
+    run_dir: Path,
+    certification: bool = typer.Option(
+        False, "--certification", help="re-execute a sealed certification run (TC-15/M5, D2)"
+    ),
+) -> None:
     """Re-execute a sealed run from its manifest and assert byte-identity."""
-    _refuse_if_stages_missing()
+    if not certification:
+        typer.echo(
+            "no rerun: real-provider runs land with a later contract; pass "
+            "--certification to re-execute a sealed certification run (D2)."
+        )
+        raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
+    from burhan.cli.certification import certification_rerun
+
+    result = certification_rerun(run_dir)
+    typer.echo(f"rerun terminal state: {result.state} ({result.run_dir})")
+    raise typer.Exit(code=EXIT_BY_STATE.get(result.state, EXIT_BY_STATE["HALTED_INTEGRITY"]))
 
 
 @app.command()
