@@ -146,3 +146,72 @@ def build_reference_comparison(
     }
     validate_and_build(ReferenceComparisonReport, report)
     return report
+
+
+_SUMMARY_ROWS: tuple[tuple[str, str], ...] = (
+    ("Total", "total"),
+    ("Matches", "matches"),
+    ("Divergent", "divergent"),
+    ("Reference missing", "reference_missing"),
+    ("Burhan only", "burhan_only"),
+    ("Unresolved", "unresolved"),
+)
+
+
+def _cell(value: object) -> str:
+    """A markdown-safe table cell: numbers rounded, ``None`` dashed, pipes escaped."""
+    if value is None:
+        return "—"
+    if _is_number(value):
+        rounded = round(float(value), 6)
+        text = str(int(rounded)) if rounded == int(rounded) else str(rounded)
+    else:
+        text = str(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def render_reference_comparison_md(report: Mapping[str, Any]) -> str:
+    """Project a :class:`ReferenceComparisonReport` to deterministic markdown.
+
+    A pure, side-effect-free view (the caller writes it to
+    ``runs/<id>/REFERENCE_COMPARISON.md``). The reference is a comparison point,
+    not ground truth — every divergence is shown ``unresolved`` with no side
+    presumed correct. Comparisons render in report order; the summary in a fixed
+    order — identical input yields byte-identical output.
+    """
+    summary = report["summary"]
+    source = report.get("reference_source", {})
+    lines: list[str] = [
+        f"# Reference comparison — {_cell(report['study_id'])}",
+        "",
+        f"Run: `{report['run_id']}`",
+        "",
+        "The reference set is a comparison point, not ground truth; every "
+        "divergence starts unresolved with no side presumed correct.",
+        "",
+    ]
+    description = source.get("description") if isinstance(source, Mapping) else None
+    if description:
+        lines += [str(description), ""]
+    lines += ["## Summary", "", "| Metric | Count |", "| --- | --- |"]
+    lines += [f"| {label} | {int(summary.get(key, 0))} |" for label, key in _SUMMARY_ROWS]
+    lines += [
+        "",
+        "## Comparisons",
+        "",
+        "| ID | Domain | Metric | Burhān | Reference | Δ | Status | Classification |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for comparison in report["comparisons"]:
+        cells = (
+            comparison.get("comparison_id"),
+            comparison.get("domain"),
+            comparison.get("metric"),
+            comparison.get("burhan_value"),
+            comparison.get("reference_value"),
+            comparison.get("delta"),
+            comparison.get("status"),
+            comparison.get("classification"),
+        )
+        lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
+    return "\n".join(lines) + "\n"

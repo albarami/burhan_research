@@ -17,7 +17,10 @@ from burhan.core.artifacts.loader import validate_and_build
 from burhan.core.artifacts.models import ReferenceComparisonReport
 from burhan.core.errors import IntegrityHalt
 from burhan.results.store import ResultsStore
-from burhan.verify.reference_comparison import build_reference_comparison
+from burhan.verify.reference_comparison import (
+    build_reference_comparison,
+    render_reference_comparison_md,
+)
 
 
 def _store(tmp_path: Path) -> ResultsStore:
@@ -184,6 +187,63 @@ def test_string_mismatch_is_divergent_without_delta(tmp_path: Path) -> None:
     assert comparison["status"] == "divergent"
     assert comparison["classification"] == "unresolved"
     assert "delta" not in comparison
+
+
+def _summary_row(md: str, label: str) -> str:
+    for line in md.splitlines():
+        if line.strip().startswith(f"| {label} |"):
+            return line
+    raise AssertionError(f"no summary row for {label!r} in:\n{md}")
+
+
+def test_render_reference_comparison_md(tmp_path: Path) -> None:
+    """Item 10: the report renders to a deterministic markdown projection.
+
+    Pure projection — the counts, the study/run identity, and each comparison
+    row appear; the reference-is-not-ground-truth framing is preserved. No I/O
+    (writing REFERENCE_COMPARISON.md is the M6 run's job, not the renderer's).
+    """
+    reference = _reference(
+        [
+            _entry("C1", stat_id="structural.path.F3->F1", reference_value=0.560, tolerance=0.01),
+            _entry(
+                "C2",
+                stat_id="measurement.reliability.F1.alpha",
+                domain="reliability",
+                reference_value=0.91,
+                tolerance=0.005,
+            ),
+            _entry(
+                "C3",
+                stat_id="effects.classification.X->Y.via_M",
+                domain="effect",
+                metric="classification",
+                reference_value="complementary",
+            ),
+        ]
+    )
+    report = build_reference_comparison(reference, _store(tmp_path), run_id="run-md-1")
+    md = render_reference_comparison_md(report)
+
+    # Identity + framing.
+    assert md.startswith("# Reference comparison")
+    assert "ref-study-2026" in md
+    assert "run-md-1" in md
+    assert "comparison point, not ground truth" in md
+    assert "Prior manual SPSS/AMOS analysis (researcher-supplied)." in md
+    # Summary counts (the binding assertion per PLAN v2 §7).
+    assert "3" in _summary_row(md, "Total")
+    assert "2" in _summary_row(md, "Matches")
+    assert "1" in _summary_row(md, "Divergent")
+    assert "0" in _summary_row(md, "Reference missing")
+    assert "1" in _summary_row(md, "Unresolved")
+    # Every comparison is projected with its status; rounded delta is readable.
+    for comparison_id in ("C1", "C2", "C3"):
+        assert comparison_id in md
+    assert "match" in md and "divergent" in md
+    assert "-0.025" in md  # C2 delta, rounded (not -0.02499999999999991)
+    # Determinism: identical input renders byte-identical output.
+    assert render_reference_comparison_md(report) == md
 
 
 @pytest.mark.parametrize(
