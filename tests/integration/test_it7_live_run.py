@@ -189,3 +189,53 @@ def test_planted_archive_mismatch_is_caught(tmp_path: Path) -> None:
 
     with pytest.raises(BurhanHalt):
         live_rerun(run.run_dir, policy=fast_policy(tmp_path))
+
+
+def test_extract_missing_study_document_halts(tmp_path: Path) -> None:
+    # AT-M16-7 ingestion guard: no study_document.docx -> typed halt before any
+    # provider call (never a silent empty prompt).
+    (tmp_path / "study" / "inputs").mkdir(parents=True)
+    factory = RecordingFactory()
+    with pytest.raises(BurhanHalt):
+        live_extract(tmp_path / "study", provider_factory=factory)
+    assert factory.calls["node_a"] == 0
+
+
+def test_extract_missing_csv_halts(tmp_path: Path) -> None:
+    # A live run needs the CSV export as pipeline data; its absence halts typed.
+    study_dir = _build_live_bundle(tmp_path)
+    for csv in (study_dir / "inputs").glob("*.csv"):
+        csv.unlink()
+    factory = RecordingFactory()
+    with pytest.raises(BurhanHalt):
+        live_extract(study_dir, provider_factory=factory)
+    assert factory.calls["node_a"] == 0
+
+
+def test_confirm_with_tampered_archive_halts(tmp_path: Path) -> None:
+    # AT-M16-3: the glance binds the Node A archive too — mutating it after the
+    # glance halts before Gate 1 (the archive-sha branch of the pause).
+    study_dir = _build_live_bundle(tmp_path)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+    archive = study_dir / "extract" / "node_a.0.json"
+    archive.write_text(archive.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    with pytest.raises(BurhanHalt):
+        live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
+    assert factory.calls["node_c"] == 0
+    assert not (study_dir / "runs").exists()
+
+
+def test_confirm_with_missing_config_halts(tmp_path: Path) -> None:
+    # AT-M16-3: a token present but a vanished config is an incomplete pending
+    # state — halt, never run against a config the glance never saw.
+    study_dir = _build_live_bundle(tmp_path)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+    (study_dir / "config" / "study_config.yaml").unlink()
+
+    with pytest.raises(BurhanHalt):
+        live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
+    assert factory.calls["node_c"] == 0
+    assert not (study_dir / "runs").exists()
