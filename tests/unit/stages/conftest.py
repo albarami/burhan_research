@@ -9,6 +9,7 @@ for _path in (
     str(_ROOT / "src"),
     str(_ROOT / "tests" / "unit" / "stages"),
     str(_ROOT / "tests" / "unit" / "orchestrator"),
+    str(_ROOT / "tests" / "unit" / "stats_deletion"),
     str(_ROOT / "tests" / "golden"),
     str(_ROOT / "tests" / "integration"),
     str(_ROOT / "tests" / "fixtures"),

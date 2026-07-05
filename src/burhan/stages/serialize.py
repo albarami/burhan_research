@@ -158,8 +158,9 @@ def measurement_rows(
 ) -> list[dict[str, Any]]:
     """spec/loadings/reliability/convergent/discriminant + item_deletion.
 
-    PB-12 (cmb) and PB-14 (respecification) are recorded ``flagged`` by the
-    adapter (no marker; adequate fit), so they emit no rows here.
+    PB-12 (cmb) and PB-14 (respecification) are data-conditioned by the adapter
+    (:func:`cmb_rows` / :func:`respecification_rows` emit their evidence only
+    when the study supports them), so they never emit rows here.
     """
     rows: list[dict[str, Any]] = [
         _row(
@@ -223,6 +224,51 @@ def measurement_rows(
         )
     )
     return rows
+
+
+def cmb_rows(cmb: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """measurement.cmb (PB-12): CLF method-variance share plus the Harman screen.
+
+    Emitted only when the CLF/marker assessment completed (a method marker was
+    declared); the evidence a ``completed`` PB-12 requires in the store.
+    """
+    clf = cmb["clf"]
+    return [
+        _row(
+            "measurement.cmb.method_variance_share",
+            float(clf["method_variance_share"]),
+            stage="measurement",
+            step="PB-12",
+            engine=_R,
+            params={
+                "harman_single_factor_share": float(cmb["harman"]["single_factor_share"]),
+                "flagged": bool(cmb["flagged"]),
+                "evidence_basis": list(cmb["evidence_basis"]),
+            },
+        )
+    ]
+
+
+def respecification_rows(respec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """measurement.respecification (PB-14): MI-driven within-construct covariances.
+
+    Emitted only when the model fit was inadequate and respecification ran; the
+    evidence a ``completed`` PB-14 requires in the store.
+    """
+    return [
+        _row(
+            "measurement.respecification.modifications",
+            len(respec["modifications"]),
+            stage="measurement",
+            step="PB-14",
+            engine=_R,
+            params={
+                "stopped": str(respec["stopped"]),
+                "baseline_chisq": float(respec["baseline_fit"]["chisq"]),
+                "final_chisq": float(respec["final_fit"]["chisq"]),
+            },
+        )
+    ]
 
 
 # -- structural (PB-15..16) --------------------------------------------------

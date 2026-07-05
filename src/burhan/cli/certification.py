@@ -23,6 +23,7 @@ from burhan.contract.node_a import NodeA
 from burhan.core.artifacts.clock import Clock
 from burhan.core.artifacts.loader import validate_and_build
 from burhan.core.artifacts.models import StudyConfig, format_utc_seconds
+from burhan.core.manifest import Manifest
 from burhan.core.orchestrator import Orchestrator, RunResult, Stage
 from burhan.core.playbook import Playbook, playbooks_dir
 from burhan.core.policy import Policy, governance_dir
@@ -42,6 +43,44 @@ class SystemClock:
 
     def now(self) -> dt.datetime:
         return dt.datetime.now(dt.UTC).replace(microsecond=0)
+
+
+class _SealedClock:
+    """Deterministic monotonic clock for the offline certification dry run.
+
+    Certification is network-free and deterministic (D2/NFR-101): every
+    timestamp must be a pure function of a single **sealed base instant**, so
+    ``burhan rerun --certification`` reconstructs the exact ``now()`` sequence
+    and regenerates byte-identical provenance / results-store / compliance
+    artifacts. A wall clock read per call would drift between run and rerun; a
+    ticking clock seeded from the base does not. The base is captured once
+    (real wall time for a realistic ``run_id``) and sealed as the manifest
+    ``started``; :func:`certification_rerun` reads it back and replays.
+    """
+
+    def __init__(self, base: dt.datetime) -> None:
+        self._base = base.astimezone(dt.UTC).replace(microsecond=0)
+        self._tick = 0
+
+    def now(self) -> dt.datetime:
+        current = self._base + dt.timedelta(seconds=self._tick)
+        self._tick += 1
+        return current
+
+
+def _run_id(base: dt.datetime) -> str:
+    """The ``runs/<id>`` name for a base instant (``^[0-9]{8}T[0-9]{6}Z$``)."""
+    return format_utc_seconds(base).replace(":", "").replace("-", "")
+
+
+def _sealed_base(run_dir: Path) -> dt.datetime:
+    """The base instant sealed in a source run's manifest (its ``started``).
+
+    ``UtcSeconds`` validates to a whole-second aware UTC ``datetime``, so the
+    sealed ``started`` is the base directly — no reparse.
+    """
+    source = Manifest.verify_seal(run_dir)  # sealed + untampered
+    return source.started
 
 
 def _node_settings(*, provider: str, lineage: str) -> NodeSettings:
@@ -80,7 +119,7 @@ def _node_manifest(*, provider: str, lineage: str) -> dict[str, Any]:
     }
 
 
-def _manifest_fields(config: StudyConfig, run_id: str) -> dict[str, Any]:
+def _manifest_fields(config: StudyConfig, run_id: str, *, study_config_sha: str) -> dict[str, Any]:
     node_a = _node_manifest(provider="anthropic", lineage="anthropic.claude")
     node_c = _node_manifest(provider="openai", lineage="openai.gpt")
     prompt = {"version": "1.0", "sha256": "0" * 64}
@@ -90,7 +129,7 @@ def _manifest_fields(config: StudyConfig, run_id: str) -> dict[str, Any]:
         "master_seed": _MASTER_SEED,
         "engine": {"version": "0.1.0", "git_commit": "0000000", "git_dirty": False},
         "hashes": {
-            "study_config": _sha256(governance_dir() / _POLICY),
+            "study_config": study_config_sha,  # the study's own config bytes (REJECT fix 3)
             "decision_policy": _sha256(governance_dir() / _POLICY),
             "protected_registry": _sha256(governance_dir() / _REGISTRY),
             "playbook": _sha256(playbooks_dir() / _PLAYBOOK),
@@ -141,33 +180,41 @@ def certification_run(
     policy: Policy | None = None,
     montecarlo_replications: int | None = None,
 ) -> RunResult:
-    """Run the study bundle in ``study_dir`` offline through the full DAG."""
-    the_clock: Clock = clock if clock is not None else SystemClock()
+    """Run the study bundle in ``study_dir`` offline through the full DAG.
+
+    The base instant is captured once (from the injected clock or wall time)
+    and drives a deterministic :class:`_SealedClock`, so the run is
+    reproducible and ``certification_rerun`` can replay it byte-for-byte.
+    """
+    base = (clock if clock is not None else SystemClock()).now()
+    sealed = _SealedClock(base)
     the_policy = policy if policy is not None else _load_policy()
     registry, config = _build_registry(study_dir, the_policy, montecarlo_replications)
-    run_id = format_utc_seconds(the_clock.now()).replace(":", "").replace("-", "")
-    fields = _manifest_fields(config, run_id)
-    return Orchestrator(the_clock).run(
-        study_dir / "runs" / run_id, registry, manifest_fields=fields
-    )
+    study_config_sha = _sha256(study_dir / "config" / "study_config.yaml")
+    run_id = _run_id(base)
+    fields = _manifest_fields(config, run_id, study_config_sha=study_config_sha)
+    return Orchestrator(sealed).run(study_dir / "runs" / run_id, registry, manifest_fields=fields)
 
 
 def certification_rerun(
     run_dir: Path,
     *,
-    clock: Clock | None = None,
     policy: Policy | None = None,
     montecarlo_replications: int | None = None,
 ) -> RunResult:
-    """Re-execute a sealed certification run and assert byte-identity (NFR-101)."""
-    the_clock: Clock = clock if clock is not None else SystemClock()
+    """Re-execute a sealed certification run and assert byte-identity (NFR-101).
+
+    The clock is not injected: rerun replays the source run's **sealed base**
+    (its manifest ``started``) through a fresh :class:`_SealedClock`, so
+    provenance / results-store / compliance timestamps reproduce exactly and
+    no ambient wall-clock drift can break the identity assertion (REJECT fix 2).
+    """
     the_policy = policy if policy is not None else _load_policy()
+    sealed = _SealedClock(_sealed_base(run_dir))
     study_dir = run_dir.parent.parent  # study/runs/<id>
     registry, _config = _build_registry(study_dir, the_policy, montecarlo_replications)
-    target_id = format_utc_seconds(the_clock.now()).replace(":", "").replace("-", "")
-    return Orchestrator(the_clock).rerun(
-        run_dir, registry, target_run_dir=study_dir / "runs" / f"{target_id}-rerun"
-    )
+    target = run_dir.parent / f"{run_dir.name}-rerun"
+    return Orchestrator(sealed).rerun(run_dir, registry, target_run_dir=target)
 
 
 def _load_policy() -> Policy:

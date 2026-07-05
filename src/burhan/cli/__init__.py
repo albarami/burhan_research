@@ -1,11 +1,12 @@
 """Burhān CLI (FR-1401): ``run``, ``rerun``, ``certify``, ``doctor``.
 
 One command starts a run; no interactive input is required after Gate 1
-(FR-306 — the orchestrator exposes no input channel at all). ``run`` and
-``rerun`` refuse cleanly while no production stage implementations are
-registered (stages land with M05+): the engine never improvises a pipeline
-(FR-1302 doctrine). Exit codes map terminal states:
-0 = COMPLETED / COMPLETED_TO_BOUNDARY · 10 = HALTED_INTEGRITY ·
+(FR-306 — the orchestrator exposes no input channel at all). After TC-15
+wired the pipeline, ``run``/``rerun`` execute the full 13-stage DAG under
+``--certification`` (the offline certified-workstation path, D2) and refuse
+cleanly without it (real-provider runs land with a later contract); the
+engine never improvises a pipeline (FR-1302 doctrine). Exit codes map
+terminal states: 0 = COMPLETED / COMPLETED_TO_BOUNDARY · 10 = HALTED_INTEGRITY ·
 11 = HALTED_VERIFICATION · 12 = HALTED_GATE · 1 = doctor not green.
 """
 
@@ -17,7 +18,6 @@ import typer
 
 from burhan.cli.doctor import production_inputs, run_doctor
 from burhan.core.errors import BurhanHalt
-from burhan.core.orchestrator import PIPELINE, Stage
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 
@@ -28,23 +28,6 @@ EXIT_BY_STATE = {
     "HALTED_VERIFICATION": 11,
     "HALTED_GATE": 12,
 }
-
-
-def _production_registry() -> dict[str, Stage]:
-    """Stage implementations land contract by contract (M05+)."""
-    return {}
-
-
-def _refuse_if_stages_missing() -> None:
-    registry = _production_registry()
-    missing = [name for name in PIPELINE if name not in registry]
-    if missing:
-        typer.echo(
-            "no run: production stage implementations land with M05+ contracts; "
-            "the engine refuses cleanly rather than improvises (FR-1302 doctrine). "
-            f"Missing stages: {', '.join(missing)}."
-        )
-        raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
 
 
 @app.command()

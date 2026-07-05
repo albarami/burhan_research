@@ -6,14 +6,15 @@ assumptions (S4), measurement (S5), structural (S6), effects (S7), robustness
 modules, serializes their results to the store (``serialize``), and marks its
 playbook step(s). No statistics are computed or altered here (D4).
 
-Two measurement steps are recorded ``flagged`` per the playbook's
-``failure_action: flag`` rather than completed, because the certification study
-does not enable them: PB-12 (CMB) — the contract designates no method marker, so
-the substantive CLF/marker test is not performable (FR-704); PB-14
-(respecification) — a remedy consulted only for inadequate fit, and the model
-fits within bands so no modification is indicated. The item-deletion protocol
-(PB-13) runs under protection and only ever *recommends* (no autonomous
-execution of PD-05).
+PB-12 (CMB) and PB-14 (respecification) are data-conditioned (:func:`assess_cmb`
+/ :func:`assess_respecification`): the adapter calls the certified CLF/marker and
+respecification controllers when the study supports them — a method marker is
+declared / the model fit is inadequate — and marks the step ``completed`` with
+serialized evidence, flagging per the playbook's ``failure_action: flag`` only
+the genuine not-applicable case (no marker / adequate fit). The certification
+study supplies no marker and fits within bands, so both are flagged there. The
+item-deletion protocol (PB-13) runs under protection and only ever *recommends*
+(no autonomous execution of PD-05).
 """
 
 from __future__ import annotations
@@ -32,19 +33,24 @@ from burhan.stages import context, serialize
 from burhan.stats.assumptions import estimator_determination, vif_composites
 from burhan.stats.deletion import run_deletion_protocol
 from burhan.stats.effects import run_effects
-from burhan.stats.measurement import run_measurement
+from burhan.stats.measurement import run_cmb, run_measurement
 from burhan.stats.montecarlo import montecarlo_power
 from burhan.stats.power import power_gate
+from burhan.stats.respecification import run_respecification
 from burhan.stats.robustness import achieved_power_report, run_alternatives
-from burhan.stats.structural import run_structural
+from burhan.stats.structural import fit_bands, run_structural
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pandas as pd  # type: ignore[import-untyped]
+
     from burhan.contract.node_a import NodeA
+    from burhan.core.artifacts.models import StudyConfig
+    from burhan.core.compliance import Compliance
     from burhan.core.orchestrator import StageContext
     from burhan.core.playbook import Playbook
-    from burhan.core.policy import Policy
+    from burhan.core.policy import DecisionLog, Policy
     from burhan.core.registry import Registry
     from burhan.review.node_c import NodeC
 
@@ -60,6 +66,103 @@ def _respec_flag(fit: dict[str, Any]) -> str:
         "respecification is a remedy consulted only for inadequate fit; the measurement model "
         f"fits within bands (CFI {fit['cfi']}, RMSEA {fit['rmsea']}, SRMR {srmr}); no "
         "modification is indicated, recorded flagged per PB-14 failure_action"
+    )
+
+
+def _fit_inadequate(fit: dict[str, Any], bands: dict[str, Any]) -> bool:
+    """Whether the measurement fit fails a governed PB-15 band.
+
+    A model within bands needs no respecification (PB-14 is consulted only for
+    inadequate fit); an inadequate model has genuine misfit, so modification
+    indices exist and the certified controller runs without its no-MI halt.
+    """
+    return (
+        float(fit["cfi"]) < float(bands["cfi_floor"])
+        or float(fit["rmsea"]) > float(bands["rmsea_ceiling"])
+        or float(fit["srmr"]) > float(bands["srmr_ceiling"])
+    )
+
+
+def assess_cmb(
+    ctx: StageContext,
+    tracker: Compliance,
+    *,
+    frame: pd.DataFrame,
+    config: StudyConfig,
+    policy: Policy,
+    playbook: Playbook,
+    rworker: RWorker,
+    marker_items: list[str],
+) -> dict[str, Any]:
+    """PB-12: run the CLF/marker CMB test when a method marker is declared.
+
+    Data-conditioned (REJECT fix 4): with markers present the certified
+    :func:`run_cmb` runs, ``measurement.cmb`` evidence is serialized, and the
+    step is marked ``completed``; with none the substantive CLF test is not
+    identifiable (FR-704) — a genuine not-applicable case — so PB-12 is flagged.
+    The module is only ever called when the data supports it; no halt is caught.
+    """
+    markers = list(marker_items)
+    if not markers:
+        return tracker.mark("PB-12", "flagged", _MARKER_FLAG)
+    cmb = run_cmb(
+        frame,
+        config,
+        policy=policy,
+        playbook=playbook,
+        rworker=rworker,
+        run_dir=ctx.run_dir,
+        call_id="measurement-cmb",
+        marker_items=markers,
+    )
+    context.store_rows(ctx, serialize.cmb_rows(cmb))
+    return tracker.mark(
+        "PB-12",
+        "completed",
+        f"CLF/marker common-method test performed (markers: {', '.join(markers)}); "
+        f"method-variance share {round(float(cmb['clf']['method_variance_share']), 3)}",
+    )
+
+
+def assess_respecification(
+    ctx: StageContext,
+    tracker: Compliance,
+    *,
+    frame: pd.DataFrame,
+    config: StudyConfig,
+    policy: Policy,
+    playbook: Playbook,
+    log: DecisionLog,
+    rworker: RWorker,
+    fit: dict[str, Any],
+) -> dict[str, Any]:
+    """PB-14: run respecification when the measurement fit is inadequate.
+
+    Data-conditioned (REJECT fix 4): fit within the governed PB-15 bands means
+    no modification is indicated — a genuine not-applicable case — so PB-14 is
+    flagged; inadequate fit runs the certified :func:`run_respecification`,
+    serializes ``measurement.respecification`` evidence, and marks the step
+    ``completed``. The controller is only called on genuine misfit, so its
+    no-modification-indices halt is never reached and never caught.
+    """
+    if not _fit_inadequate(fit, fit_bands(playbook)):
+        return tracker.mark("PB-14", "flagged", _respec_flag(fit))
+    respec = run_respecification(
+        frame,
+        config,
+        policy=policy,
+        playbook=playbook,
+        log=log,
+        rworker=rworker,
+        run_dir=ctx.run_dir,
+        call_id="measurement-respec",
+    )
+    context.store_rows(ctx, serialize.respecification_rows(respec))
+    return tracker.mark(
+        "PB-14",
+        "completed",
+        "respecification applied under the MI floor and policy cap: "
+        f"{len(respec['modifications'])} modification(s), stopped={respec['stopped']}",
     )
 
 
@@ -253,10 +356,18 @@ class Measurement:
     consumes: tuple[str, ...] = (context.PREP_FRAME, context.CONTRACT_CONFIG)
     produces: tuple[str, ...] = ("stats/measurement.json",)
 
-    def __init__(self, *, policy: Policy, playbook: Playbook, registry: Registry) -> None:
+    def __init__(
+        self,
+        *,
+        policy: Policy,
+        playbook: Playbook,
+        registry: Registry,
+        marker_items: list[str] | None = None,
+    ) -> None:
         self._policy = policy
         self._playbook = playbook
         self._registry = registry
+        self._marker_items = list(marker_items) if marker_items else []
 
     def execute(self, ctx: StageContext) -> None:
         frame = context.load_frame(ctx)
@@ -296,14 +407,33 @@ class Measurement:
         tracker.mark(
             "PB-11", "completed", "discriminant validity (Fornell-Larcker + HTMT) assessed"
         )
-        tracker.mark("PB-12", "flagged", _MARKER_FLAG)
+        assess_cmb(
+            ctx,
+            tracker,
+            frame=frame,
+            config=config,
+            policy=self._policy,
+            playbook=self._playbook,
+            rworker=rworker,
+            marker_items=self._marker_items,
+        )
         tracker.mark(
             "PB-13",
             "completed",
             f"item-deletion protocol under protection: {deletion['mode']} "
             f"({len(deletion['candidates'])} candidate(s), {len(deletion['deletions'])} deleted)",
         )
-        tracker.mark("PB-14", "flagged", _respec_flag(measurement["fit"]))
+        assess_respecification(
+            ctx,
+            tracker,
+            frame=frame,
+            config=config,
+            policy=self._policy,
+            playbook=self._playbook,
+            log=context.decision_log(ctx),
+            rworker=rworker,
+            fit=measurement["fit"],
+        )
 
 
 class Structural:

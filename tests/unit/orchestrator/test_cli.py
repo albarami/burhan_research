@@ -39,6 +39,17 @@ def test_rerun_refuses_cleanly_without_the_certification_flag(tmp_path) -> None:
     assert "--certification" in result.output
 
 
+def test_cli_exposes_no_empty_production_registry() -> None:
+    # REJECT fix 1: after TC-15 wired the pipeline, no CLI-visible production
+    # registry may be observably empty. The stale ``_production_registry()``
+    # helper returned ``{}`` — a review probe could still call it and see an
+    # empty registry, contradicting the wired 13-stage DAG.
+    import burhan.cli as cli_module
+
+    stale = getattr(cli_module, "_production_registry", None)
+    assert stale is None or stale() != {}
+
+
 def test_certify_validates_governed_contracts() -> None:
     result = runner.invoke(app, ["certify"])
     assert result.exit_code == 0

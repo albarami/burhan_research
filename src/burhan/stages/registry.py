@@ -50,8 +50,14 @@ def production_registry(
     registry: DecisionRegistry,
     data_dictionary: str | None = None,
     montecarlo_replications: int | None = None,
+    marker_items: list[str] | None = None,
 ) -> dict[str, Stage]:
-    """Every fixed-DAG stage, keyed by name, in DAG order (AT-M15-4)."""
+    """Every fixed-DAG stage, keyed by name, in DAG order (AT-M15-4).
+
+    ``marker_items`` names any method-marker items the study declares for the
+    PB-12 CLF/marker CMB test (none under the certification study, which fits
+    within bands and declares no marker — PB-12/PB-14 flag there).
+    """
     stages: list[Stage] = [
         Ingest(export_path=export_path, header_rows=header_rows),
         Contract(node_a=node_a, study_document=study_document, data_dictionary=data_dictionary),
@@ -59,7 +65,7 @@ def production_registry(
         Power(policy=policy, playbook=playbook, montecarlo_replications=montecarlo_replications),
         Prep(export_path=export_path, policy=policy, playbook=playbook),
         Assumptions(policy=policy, playbook=playbook),
-        Measurement(policy=policy, playbook=playbook, registry=registry),
+        Measurement(policy=policy, playbook=playbook, registry=registry, marker_items=marker_items),
         Structural(playbook=playbook),
         Effects(policy=policy, playbook=playbook),
         Robustness(playbook=playbook),
