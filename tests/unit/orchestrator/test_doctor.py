@@ -167,3 +167,28 @@ def test_report_render_lists_every_check(tmp_path: Path) -> None:
     for check in report.checks:
         assert check.name in rendered
     assert "PASS" in rendered
+
+
+def test_certified_workstation_marker_pass_when_set(tmp_path: Path) -> None:  # TC-15 P3
+    report = run_doctor(_reference_inputs(tmp_path, env={"BURHAN_CERTIFIED_WORKSTATION": "1"}))
+    marker = next(c for c in report.checks if c.name == "certified_workstation")
+    assert marker.status == "pass"
+    assert "BURHAN_CERTIFIED_WORKSTATION" in marker.detail
+    assert report.passed
+
+
+def test_certified_workstation_marker_skips_when_unset(tmp_path: Path) -> None:  # TC-15 P3
+    report = run_doctor(_reference_inputs(tmp_path))
+    marker = next(c for c in report.checks if c.name == "certified_workstation")
+    assert marker.status == "skip"  # absent marker is declared, never a failure
+    assert "BURHAN_CERTIFIED_WORKSTATION" in marker.detail
+    assert report.passed
+
+
+def test_certified_workstation_marker_never_fails_doctor(tmp_path: Path) -> None:  # TC-15 P3
+    # Any non-"1" value is a declared skip, not a fail: doctor greenness must
+    # not depend on the marker (it is diagnostic output, not gate logic).
+    report = run_doctor(_reference_inputs(tmp_path, env={"BURHAN_CERTIFIED_WORKSTATION": "0"}))
+    marker = next(c for c in report.checks if c.name == "certified_workstation")
+    assert marker.status == "skip"
+    assert report.passed

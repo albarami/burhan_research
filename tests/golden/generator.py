@@ -220,11 +220,19 @@ def _case_row(
     return [case_id, "1", *items, attention, firm_size, progress, finished, timestamp]
 
 
-def build_golden(seed: int, *, with_defects: bool = True) -> GoldenStudy:
-    """The golden study: 32 clean cases plus the planted-defect block."""
+def build_golden(seed: int, *, with_defects: bool = True, n_clean: int = _N_CLEAN) -> GoldenStudy:
+    """The golden study: ``n_clean`` clean cases plus the planted-defect block.
+
+    ``n_clean`` defaults to the certified 32 so every existing golden caller
+    is unchanged; TC-15's integration fixture raises it (defects off) to reach
+    an adequately-powered N. The defect block is pinned to the 32-case layout,
+    so planting requires the default clean count.
+    """
+    if with_defects and n_clean != _N_CLEAN:
+        raise ValueError("planted defects are pinned to the 32-case layout; raise n_clean only")
     rng = np.random.default_rng(seed)
     manifest: dict[str, list[dict[str, str]]] = {name: [] for name in DEFECT_CLASSES}
-    raw_values = [_raw_item_values(rng) for _ in range(_N_CLEAN)]
+    raw_values = [_raw_item_values(rng) for _ in range(n_clean)]
     rows = _header_rows()
     for index, values in enumerate(raw_values, start=1):
         stored = _stored(values, un_reverse_cu4=with_defects)

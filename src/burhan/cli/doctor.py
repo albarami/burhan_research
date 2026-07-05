@@ -213,6 +213,25 @@ def run_doctor(inputs: DoctorInputs) -> DoctorReport:
     else:
         checks.append(DoctorCheck("git_state", "pass", f"clean at {commit_out.strip()[:12]}"))
 
+    # Certified-workstation marker (TC-15 P3): diagnostic output only — the
+    # marker's presence never gates doctor greenness (a non-certified host
+    # still passes), so absence is a declared skip, never a fail.
+    if inputs.env.get("BURHAN_CERTIFIED_WORKSTATION") == "1":
+        checks.append(
+            DoctorCheck(
+                "certified_workstation", "pass", "BURHAN_CERTIFIED_WORKSTATION=1 (certified)"
+            )
+        )
+    else:
+        checks.append(
+            DoctorCheck(
+                "certified_workstation",
+                "skip",
+                "BURHAN_CERTIFIED_WORKSTATION unset; non-certified host (workstation-exact "
+                "checks defer to their CI value-band shadows)",
+            )
+        )
+
     return DoctorReport(
         checks=tuple(checks),
         python_version=inputs.python_version,
