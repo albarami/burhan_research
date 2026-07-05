@@ -12,11 +12,12 @@
 
 ## 1. Inputs (staged, engine-external)
 
-At `~/projects/burhan-studies/dba-validation-study/inputs/`:
+At the engine-resolved studies root — `$BURHAN_STUDIES_DIR/dba-validation-study/inputs/` (the run stages and executes against the **same** `BURHAN_STUDIES_DIR` the engine resolves; `burhan doctor` prints it, and inputs MUST be placed there, not at any hardcoded path):
 - **U1** Study document — *Organizational Readiness versus Technical Capabilities* (DOCX). Node A source.
 - **U2** Raw survey export — the Qualtrics CSV. Pipeline data.
 - **U4** Survey instrument — the pilot survey DOCX, serving as data dictionary.
 - **U3 / reference set** — the manual results, transcribed into the reference worksheet (§3) from the paper's tables and text.
+- **U5** Adopted thresholds — the study's methodological positions where the literature varies (fit bands, HTMT ceiling, inclusion %, loading floor, reverse-coded items). **Already encoded** in `CB_SEM_PLAYBOOK_v1.0` and `decision_policy` from the paper's methodology chapter; staged here by reference to those governed files, not as a separate document. This row records that U5 is satisfied by the approved playbook/policy, closing the plan's U1–U5 requirement.
 
 ## 2. Execution Sequence
 
@@ -30,6 +31,27 @@ At `~/projects/burhan-studies/dba-validation-study/inputs/`:
 ## 3. Reference-Extraction Worksheet (pre-populated from the paper)
 
 Values transcribed from the researcher's paper for comparison. **Dual-source rule:** where a value appears in both a table and the text, both are checked; single-source values are marked low-confidence and re-verified against the raw run. These are the *manual* figures — the comparison target, **not** ground truth.
+
+### 3.1 Tolerance Table (governs every `status` decision)
+
+A row is `match` only if Burhān's value falls within the tolerance for its metric class; otherwise `divergent`. Tolerances reflect that Burhān and the manual analysis use independent engines (lavaan/semopy vs. AMOS) and, by policy, sometimes different methods (FIML vs. manual treatment), so exact equality is not expected for estimated quantities.
+
+| Metric class | Tolerance for `match` | Rationale |
+|---|---|---|
+| Counts (raw N, exclusions, final N) | exact (±0) | integers must reconcile; any difference is `divergent` and investigated |
+| Reliability (α, CR) | ±0.02 | independent estimation, same data |
+| AVE | ±0.02 | as above |
+| Standardized loadings | ±0.05 | estimator/engine differences |
+| Squared inter-construct correlations | ±0.05 | as above |
+| Fit indices (CFI, TLI, RMSEA, SRMR) | ±0.01 | independent SEM engines; RMSEA also compared on its 90% CI overlap |
+| CMIN/DF | ±0.10 | sensitive to engine df handling |
+| Path coefficients (standardized) | ±0.05 | independent estimation |
+| Bootstrapped effects (indirect/direct/total) | CI overlap + point within ±0.05 | resampling variability at fixed seed |
+| p-values / significance verdict | verdict must match at α=.05 | a supported↔not-supported flip is always `divergent`, never absorbed by numeric tolerance |
+| Hypothesis outcome (supported / not) | exact categorical match | the decisive comparison; any flip is `divergent` |
+
+Where a metric is `reference_missing` (e.g., HTMT) no tolerance applies — the row is evaluated on Burhān's value against the playbook threshold, not against a manual number.
+
 
 ### R-A · Sample & data treatment
 | Item | Manual value (paper) | Confidence |
@@ -99,23 +121,30 @@ Values transcribed from the researcher's paper for comparison. **Dual-source rul
 | Manually dropped items | *(from paper — iterative refinement)* |
 | Note | Burhān re-derives retention from the **designed** pool under PB-13 (protected; recommendations only). Deltas vs. the manual set are the item-level evidence for the supervisor's revision request. |
 
-## 4. Divergence Classification
+## 4. Divergence Classification (schema-valid)
 
-Every `REFERENCE_COMPARISON.md` row is resolved to exactly one, with rationale into provenance — **no side presumed correct**:
+Each `REFERENCE_COMPARISON.md` row carries a `status` and, when not a plain match, a `classification` — using **exactly** the enums in `reference_comparison.schema.json` (no other labels are valid):
 
-- **MATCH** — within tolerance; no action.
-- **MANUAL_WEAKNESS** — engine exposes a prior-analysis error, gap, or inconsistency (e.g., an N-chain that doesn't reconcile, an un-run HTMT that fails, the H3a contradiction, a questionable retained item). Documented; feeds the supervisor's construct/item revision. **No engine change.**
-- **ENGINE_OR_POLICY_CORRECTION** — a Burhān defect or a policy value producing a wrong/indefensible result. Fixed via a contract or researcher-governed change, then the run re-executes.
-- **EXPECTED_METHOD_DIFFERENCE** — a legitimate, documented difference in approach the engine applies by policy (FIML vs. the manual treatment; HTMT added; Zhao–Lynch–Chen mediation classification). Recorded as method provenance, not a defect on either side.
+**status** (per comparison row):
+- `match` — Burhān's value equals the manual reference within the §3.1 tolerance for that metric class.
+- `divergent` — values differ beyond tolerance; requires a `classification` below.
+- `reference_missing` — the manual analysis reported no comparable value (e.g., HTMT, which the paper never computed); Burhān's value stands on its own, no manual side to compare.
+- `burhan_only` — Burhān produces an output with no manual counterpart by design (e.g., Zhao–Lynch–Chen mediation classification).
 
-Resolution completes when **unresolved = 0** and every non-MATCH row carries its classification and rationale.
+**classification** (required for every `divergent` row; also applied to `reference_missing`/`burhan_only` where a judgment is needed):
+- `unresolved` — default on generation; the gate cannot pass while any remain.
+- `manual_weakness` — the engine exposes a prior-analysis error, gap, or inconsistency (e.g., an N-chain that does not reconcile, an un-run HTMT that now fails, the H3a prose/table contradiction, a questionable retained item). Documented; feeds the supervisor's construct/item revision. **No engine change.**
+- `engine_or_policy_correction` — a Burhān defect or a policy value producing a wrong/indefensible result. Fixed via a contract or researcher-governed change, then the run re-executes.
+- `equivalent_defensible_choice` — a legitimate, documented difference in approach the engine applies by policy that is defensible on both sides (FIML vs. the manual treatment; HTMT added; mediation typology). Recorded as method provenance, not a defect on either side.
+
+Resolution completes when the summary's `unresolved` count is **0** and every `divergent` row carries a non-`unresolved` classification with rationale in provenance.
 
 ## 5. Pass Criteria (M6)
 
 - Stage-1A run reached a valid terminal state; all invariants passed; N-chain sums exactly.
 - Both review gates passed; provenance complete; compliance checklist covers PB-01..PB-19.
 - Re-run from the archived config reproduces identical outputs (NFR-101).
-- `REFERENCE_COMPARISON.md` complete with **unresolved = 0**; every ENGINE_OR_POLICY_CORRECTION fixed and re-run; every MANUAL_WEAKNESS and EXPECTED_METHOD_DIFFERENCE documented.
+- `REFERENCE_COMPARISON.md` complete with the summary's **`unresolved` count = 0**; every `engine_or_policy_correction` fixed and re-run; every `manual_weakness` and `equivalent_defensible_choice` documented.
 - A short **Validation Findings** note summarizes: engine terminal state, the N-chain the engine derived, the measurement/fit/hypothesis comparison, and the item-retention deltas destined for the supervisor.
 
 ## 6. Sign-off
@@ -127,4 +156,4 @@ Resolution completes when **unresolved = 0** and every non-MATCH row carries its
 
 ## 7. Boundaries
 
-M6 changes no governed document and no engine behavior except through a §4 ENGINE_OR_POLICY_CORRECTION routed via normal change control. The DBA study's contract, results, and comparison live entirely under the engine-external studies root (FR-1402); nothing from it enters the engine repository. Hayat Tayyibah and all new-production studies remain blocked until M7 go-live.
+M6 changes no governed document and no engine behavior except through a §4 `engine_or_policy_correction` routed via normal change control. The DBA study's contract, results, and comparison live entirely under the engine-external studies root (FR-1402); nothing from it enters the engine repository. Hayat Tayyibah and all new-production studies remain blocked until M7 go-live.
