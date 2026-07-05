@@ -102,3 +102,20 @@ def build_integration_study(seed: int, *, n: int = _N_DEFAULT) -> GoldenStudy:
         rows.append(_case_row(f"R_{index:03d}", stored, rng))
     assert set(_CONSTRUCTS) == {"RES", "CUL", "INT"}  # latent chain matches the contract
     return GoldenStudy(config=integration_config(), rows=rows, manifest=manifest)
+
+
+def study_document() -> str:
+    """A minimal source document Node A's contract validation accepts.
+
+    Names each reverse-coded item beside the word ``reverse`` so the single-
+    source rule (V7) confirms the contract's reverse-coding flags, and states
+    the partial-mediation hypotheses for the human record.
+    """
+    return (
+        "Study of resilience (RES), organizational culture (CUL), and adoption "
+        "intention (INT), measured with 7-point Likert items.\n"
+        "Item RS4 is reverse-coded.\n"
+        "Item CU4 is reverse-coded.\n"
+        "Hypotheses: RES -> CUL (H1); CUL -> INT (H2); RES -> INT direct (H3); "
+        "RES -> INT mediated by CUL (H4).\n"
+    )
