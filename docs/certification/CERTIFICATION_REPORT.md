@@ -2,22 +2,23 @@
 
 **Instrument:** `docs/11_CERTIFICATION_PLAN.md` (approved as M5 gate instrument).
 **Executed by:** Claude Code (implementer), on the certified workstation.
-**Commit under test:** `c02d70a4f97f50c75606bf15f2c1450894cacbef` (branch `main`).
-**Date (UTC):** 2026-07-04.
+**Commit under test:** `e8b324fdde688ceafb839f1aa785ca837400ea21` (branch `main`).
+**Date (UTC):** 2026-07-05.
+**Re-run of:** the 2026-07-04 GATE FAIL at `c02d70a` (blocked at C4). See Appendix A.
 
 ## Verdict (for Codex per §7)
 
-**GATE FAIL — blocked at C4.** P1–P5, C1, C2, and C3 pass on the certified
-workstation. **C4 (IT-1..IT-4) cannot execute**: the production Stage-1A
-pipeline is not wired into `src/` — `burhan run`/`rerun` refuse cleanly with
-`HALTED_INTEGRITY` (exit 10) because the production stage registry is empty.
-Wiring the 13 pipeline stages is a `src/` behavior change that §6's bounded
-harness authorization explicitly forbids, so it cannot be done under this gate;
-it requires a researcher-issued contract. Details in C4 below.
+**All battery lines pass on the certified workstation — submitted for Codex's
+GATE verdict.** P1–P5 and C1–C4 each pass. The C4 blocker from the prior run is
+resolved: the production Stage-1A pipeline is now wired into `src/` by contract
+**TC-15** (PR #17, squash-merged to `main` as `a0c0cde`), so IT-1..IT-3 execute
+end-to-end and `burhan run --certification` reaches `COMPLETED`. The P3
+evidence-form deviation is also resolved: `burhan doctor` now emits the
+certified-workstation line the plan names.
 
-Per §3 (binary pass/fail) the gate does not certify until the entire battery
-passes and re-executes from §1. This report is submitted for Codex's GATE
-verdict; the researcher M5 signature is **not** unlocked.
+Per §3 the gate is binary and this battery was re-executed in full from §1.
+Per §7 the GATE PASS/FAIL verdict is Codex's to post, and the researcher records
+the M5 signature **only after** a GATE PASS — this report does **not** record it.
 
 ---
 
@@ -25,16 +26,20 @@ verdict; the researcher M5 signature is **not** unlocked.
 
 | # | Check | Result | Evidence |
 |---|---|---|---|
-| P1 | `git status` clean on `main`; HEAD SHA | **PASS** | clean tree; HEAD `c02d70a4f97f50c75606bf15f2c1450894cacbef` |
-| P2 | `uv run burhan doctor` green | **PASS** | exit 0; all `[PASS]`; `provider_connectivity [SKIP]` (deferred pre-adapters, by design); no `[FAIL]` |
-| P3 | `BURHAN_CERTIFIED_WORKSTATION=1` present in researcher env | **PASS (deviation on evidence form)** | marker present = `1`, sourced from the documented secrets path `~/.config/burhan/.env`. **Deviation:** the plan's evidence column names a "doctor line," but `burhan doctor` emits none — `src/` has zero references to the marker. Evidenced by direct env inspection instead; doctor was **not** modified (prohibited `src/` change). See Deviations. |
+| P1 | `git status` clean on `main`; HEAD SHA recorded | **PASS** | clean tree; HEAD `e8b324fdde688ceafb839f1aa785ca837400ea21`; independently confirmed by doctor `git_state: clean at e8b324fdde68` |
+| P2 | `uv run burhan doctor` green | **PASS** | exit 0; 9 `[PASS]`, 0 `[FAIL]`; final verdict `PASS`; `provider_connectivity [SKIP]` (deferred until LLM adapters land, TC-06/M06 — no network outside adapters, by design) |
+| P3 | `BURHAN_CERTIFIED_WORKSTATION=1` present (evidence: doctor line) | **PASS** | doctor emits `[PASS] certified_workstation: BURHAN_CERTIFIED_WORKSTATION=1 (certified)`. The prior run's evidence-form deviation (no doctor line) is **resolved** — TC-15 added the marker check to `burhan doctor`. |
 | P4 | `uv.lock` + `workers/r/renv.lock` hashes | **PASS** | `uv.lock` `ba58ef5b55a3f431b45b1f0ad860d5b780d38e7b5cf2a841b01d8807f2ab8e0e`; `workers/r/renv.lock` `069c2b33829cb0fd2cc7bda578b94b86d22ec3c333bcf6376244c061af0f3306` |
-| P5 | Playbook / policy / registry hashes | **PASS** | playbook `CB_SEM_PLAYBOOK_v1.0.yaml` `a88fab40d873a4c7a65b87d41704f55eca3a7ad0c88cdc4e5a3ea50d60820fe1`; policy `decision_policy.template.yaml` `250539f785826ae63414f55eed746dff5f09f271599ab340fa8ed4523f0a28e3`; registry `protected_decisions.registry.yaml` `e05357eefb7545310ff429692a0a62cd0c3af6b0528cb732726a38c504f32bc6` |
+| P5 | Playbook / policy / registry hashes | **PASS** | playbook `playbooks/CB_SEM_PLAYBOOK_v1.0.yaml` `a88fab40d873a4c7a65b87d41704f55eca3a7ad0c88cdc4e5a3ea50d60820fe1`; policy `policy/decision_policy.template.yaml` `250539f785826ae63414f55eed746dff5f09f271599ab340fa8ed4523f0a28e3`; registry `policy/protected_decisions.registry.yaml` `e05357eefb7545310ff429692a0a62cd0c3af6b0528cb732726a38c504f32bc6` |
+
+*P5 path note:* the governed artifacts are tracked at the repo-root paths above
+(`playbooks/`, `policy/`); the prior report labelled them `docs/06_*`/`docs/07_*`
+in error. The bytes — and therefore the hashes — are unchanged.
 
 All battery suites below were run with the certified environment:
 `source ~/.config/burhan/.env` + determinism pins (`TZ=UTC LC_ALL=C.UTF-8
 PYTHONHASHSEED=0 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`) +
-`BURHAN_CERTIFIED_WORKSTATION=1`.
+`BURHAN_CERTIFIED_WORKSTATION=1`, `-p no:cacheprovider`.
 
 ## §2 Battery
 
@@ -53,7 +58,11 @@ PYTHONHASHSEED=0 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`) +
 
 ### C2 — Benchmark replication (FR-1502) — **PASS**
 
-Full benchmark set + anchor suites → **76 passed, 0 skipped**.
+Benchmark set + power/effects anchor suites
+(`tests/benchmark/ tests/unit/stats_power/ tests/unit/stats_effects/test_effects_benchmark.py`)
+→ **86 passed, 0 skipped**. (Superset of the prior run's 76 — the lane now
+carries the full `stats_power` suite; all five published anchors are present and
+passed.)
 
 | # | Anchor | Named tests (all PASSED) |
 |---|---|---|
@@ -67,10 +76,9 @@ Benchmark runner + parity-map write/reproduce: `test_runner_replicates_published
 `test_committed_map_matches_runner_output`, `test_committed_map_is_loadable_and_consumed_by_verification` — PASSED.
 
 **Note (material to why CI cannot substitute):** anchor #5's exact assertion is
-gated on `BURHAN_CERTIFIED_WORKSTATION=1` (`test_certified_anchor_values` line
-~378). On-workstation it asserts the R=400 values byte-equal; off-workstation
-(CI) the same test asserts only the tolerance band. The exact branch was
-exercised here.
+gated on `BURHAN_CERTIFIED_WORKSTATION=1` (`test_certified_anchor_values`).
+On-workstation it asserts the R=400 values byte-equal; off-workstation (CI) the
+same test asserts only the tolerance band. The exact branch was exercised here.
 
 ### C3 — Cross-engine parity map (FR-902/903) — **PASS**
 
@@ -106,69 +114,73 @@ exercised here.
   `test_doctored_engine_value_beyond_halt_multiplier_halts`,
   `test_beyond_halt_multiplier_raises_verification_halt`.
 
-### C4 — System integration (IT-1..IT-4) — **FAIL (blocked; out of §6 bounds)**
+### C4 — System integration (IT-1..IT-4) — **PASS**
 
-| IT | Requirement | Result |
-|---|---|---|
-| IT-1 | Golden study end-to-end → `COMPLETED`; `METHOD_COMPLIANCE_CHECKLIST.md` covers PB-01..19 | **BLOCKED** |
-| IT-2 | `burhan rerun` on sealed IT-1 → byte-identical | **BLOCKED** (depends on IT-1) |
-| IT-3 | Under-powered fixture → `METHOD_ADVISORY.md` → `COMPLETED_TO_BOUNDARY` | **BLOCKED** |
-| IT-4 | C1–C3 wired in CI as permanent regression (FR-1504), green run IDs | **PASS** — CI `certification` job runs golden+benchmark+verify+coverage+R lintr on every push; green at run **28708401860** for `c02d70a` (with off-workstation montecarlo as value-band shadow per E-R5). |
+`uv run pytest tests/integration/` → **11 passed, 0 skipped** (457.78s), covering
+the plan's IT-1..IT-3 plus the TC-15 CLI/manifest acceptance tests; the plan's
+IT-4 (regression permanence, FR-1504) is CI-evidenced by the green run IDs below.
 
-**Root cause (concrete evidence).** The production Stage-1A pipeline is not
-wired into `src/`:
+| IT | Requirement | Result | Evidence |
+|---|---|---|---|
+| IT-1 | Golden study end-to-end → `COMPLETED`; Stage-1A steps carry store-backed evidence | **PASS** | `test_it1_dry_run.py::test_golden_study_runs_end_to_end_to_completed`, `::test_completed_stage_1a_steps_have_store_backed_evidence` (AT-M15-1) |
+| IT-2 | `burhan rerun` on sealed run → byte-identical; identity assertion catches nondeterminism | **PASS** | `test_it2_rerun.py::test_real_pipeline_reruns_byte_identical`, `::test_identity_assertion_catches_a_nondeterministic_stub` (AT-M15-2) |
+| IT-3 | Under-powered fixture → advisory boundary → `COMPLETED_TO_BOUNDARY` | **PASS** | `test_it3_boundary.py::test_underpowered_study_stops_at_the_advisory_boundary` (AT-M15-3) |
+| IT-4 | C1–C3 wired in CI as permanent regression (FR-1504), green run IDs | **PASS** | CI `certification` job runs golden+benchmark+verify+coverage+R lintr on every push to `main`, green at run **28743737378** (squash `a0c0cde`) and run **28743763894** (sign-off `e8b324f`); off-workstation montecarlo as value-band shadow per E-R5 |
 
-- `burhan run <study>` → `no run: production stage implementations land with
-  M05+ contracts ... Missing stages: ingest, contract, gate1, power, prep,
-  assumptions, measurement, structural, effects, robustness, narrate, gate2,
-  package.` — **exit 10 (HALTED_INTEGRITY)**.
-- `burhan rerun <run>` → same refusal, **exit 10**.
-- `src/burhan/cli/__init__.py::_production_registry()` returns `{}`; the
-  orchestrator's `PIPELINE` lists all 13 stages as missing.
-- No concrete `Stage` implementations exist in `src/` (only the `Stage`
-  Protocol + generic `Orchestrator` engine in `core/orchestrator.py`). The
-  checklist/advisory **generators** exist as libraries (`core/compliance.py`,
-  `core/advisory.py`) but are not wired into a runnable pipeline.
+Additional `tests/integration/` coverage (delivered by TC-15, all PASSED),
+strengthening C4 beyond the plan's minimum:
 
-**Why this cannot be resolved under this gate.** IT-1..IT-3 require a real
-Stage-1A run (only the LLM nodes stubbed, per C4). That means 13 concrete stage
-adapters + a production registry factory + pipeline wiring in `src/` — a `src/`
-behavior change. §6 authorizes **test/fixture code only, no `src/` behavior
-changes**; it authorizes scaffolding to *drive* an existing pipeline, not to
-*build* the pipeline. So §6 does not cover this, and no contract (TC-01..TC-12)
-delivered the stage-wiring — TC-04 delivered the orchestrator engine + the CLI
-that deliberately refuses while the registry is empty. This is missing
-contracted work, not a harness gap.
+- `test_it4_cli_run.py::test_certification_run_reaches_completed` — `burhan run --certification` reaches `COMPLETED` (AT-M15-4).
+- `test_it5_manifest_hash.py::test_manifest_hashes_track_their_own_source_files` — manifest `study_config`/`decision_policy` hashes track their own source (NFR-102).
+- `test_it6_cli_certification.py::test_run_command_reaches_completed_via_cli`, `::test_rerun_command_is_byte_identical_via_cli` — the Typer CLI run/rerun exercised end-to-end (byte-identical rerun, NFR-101).
 
-**Recommended fix (researcher/Codex).** Issue a contract that wires the 13
-production stages into the orchestrator (assembling the existing
-prep/stats/verify/compliance/advisory modules into `Stage` adapters + a
-non-empty production registry), then re-execute the full battery from §1 per §3.
-No `src/` change was made under this gate.
+**Resolution of the prior C4 blocker.** The 2026-07-04 run failed C4 because the
+production Stage-1A pipeline was unwired in `src/` and wiring it exceeded §6's
+bounds (test/fixture only), so it required a contract. That contract —
+**TC-15** — was issued, implemented, reviewed, APPROVED, and squash-merged to
+`main` as `a0c0cde` (PR #17): it wired the 13-stage DAG into the orchestrator,
+added the concrete Stage adapters and a non-empty production registry, made
+`burhan run --certification` execute to `COMPLETED`, sealed the rerun clock
+(NFR-101), hashed the actual consumed sources into the manifest (NFR-102), and
+added the certified-workstation doctor line. No `src/` change is made under this
+gate; the only governed-document change is adding this report (§6).
 
 ## §5 Evidence pointers
 
-- Commit under test: `c02d70a4f97f50c75606bf15f2c1450894cacbef`.
-- CI (IT-4 / FR-1504): run `28708401860` on `c02d70a` — jobs `governed-documents`
-  and `certification` both success.
+- Commit under test: `e8b324fdde688ceafb839f1aa785ca837400ea21`.
+- CI (IT-4 / FR-1504): runs `28743737378` (`a0c0cde`) and `28743763894`
+  (`e8b324f`) on `main` — `governed-documents` and `certification` jobs both success.
 - Parity-map hash: `1aa5511c69c0e514b19ee9abb724b5ec5dff820c5ebc6d14fc8c69fb9c54e355`.
-- IT terminal states: `burhan run`/`rerun` → `HALTED_INTEGRITY` (exit 10); no
-  sealed run produced (pipeline unwired), so no IT artifact hash roots.
+- Battery lane results (certified workstation): C1 `tests/golden/` 32 passed;
+  C2 benchmark+power/effects anchors 86 passed; C3 `tests/unit/verify/` 97 passed;
+  C4 `tests/integration/` 11 passed.
+- Governed-artifact hashes: P4/P5 rows above.
+
+## Appendix A — Re-run delta from the 2026-07-04 GATE FAIL (§8 permanence)
+
+| Item | 2026-07-04 (`c02d70a`) | 2026-07-05 (`e8b324f`) | What changed |
+|---|---|---|---|
+| P3 | PASS (deviation: no doctor line; env-inspection substitute) | PASS (doctor line present) | TC-15 added the `certified_workstation` check to `burhan doctor` |
+| C4 IT-1 | BLOCKED (pipeline unwired) | PASS | TC-15 wired the 13-stage pipeline; golden study reaches `COMPLETED` |
+| C4 IT-2 | BLOCKED (depended on IT-1) | PASS | sealed-base rerun is byte-identical |
+| C4 IT-3 | BLOCKED | PASS | under-powered fixture reaches `COMPLETED_TO_BOUNDARY` |
+| C4 IT-4 | PASS (CI green, unwired src) | PASS (CI green, wired src) | run IDs updated to the merged-TC-15 commits |
+| C1/C2/C3 | PASS (32 / 76 / 97) | PASS (32 / 86 / 97) | unchanged; C2 lane broadened to the full `stats_power` suite |
 
 ## Deviations
 
-1. **P3 evidence form.** Marker present in the researcher env (check satisfied),
-   but `burhan doctor` emits no certified-workstation line (no `src/` reference
-   to the marker). Evidenced by direct env inspection, not a doctor line. Doctor
-   was not modified (prohibited `src/` change). For Codex to accept the
-   substitute evidence, or to treat the missing doctor line as a harness gap for
-   a future governed change.
-2. **C4 blocker** (see above): production pipeline unwired; out of §6 bounds;
-   requires a contract.
+None material. Two clarifications carried into this report:
+
+1. **P5 path labels corrected.** Governed artifacts are tracked at
+   `playbooks/` and `policy/` (repo root); the prior report's `docs/06_*`/`docs/07_*`
+   labels were wrong. Bytes and hashes are unchanged.
+2. **C2 lane is a superset** of the prior run (86 vs 76 tests) because it now
+   includes the complete `tests/unit/stats_power/` suite; all five published
+   anchors are present and passed. Reported as run so Codex can reproduce.
 
 ## Sign-off
 
 | Role | Verdict | Date | Note |
 |---|---|---|---|
 | Codex (gate) | *pending* | — | GATE PASS / GATE FAIL with exact deficiencies (§7.1) |
-| Researcher (M5) | *blocked* | — | not unlocked; requires GATE PASS after C4 remediation |
+| Researcher (M5) | *not recorded* | — | recorded by the researcher only after a Codex GATE PASS (§7); intentionally left blank |
