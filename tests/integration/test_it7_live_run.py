@@ -24,6 +24,7 @@ from stub_nodes import node_a_provider, node_c_approve_provider
 from burhan.cli.live import live_confirm, live_extract, live_rerun
 from burhan.contract.llm_base import LlmSettings
 from burhan.core.errors import BurhanHalt
+from burhan.core.manifest import Manifest
 
 
 class RecordingFactory:
@@ -94,6 +95,47 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _write_reference_set(study_dir: Path) -> Path:
+    """A reference set naming statistics the integration run actually emits."""
+    reference = {
+        "study_id": "integration-adoption-2026",
+        "source": {
+            "description": "Prior manual analysis (IT-7 fixture reference).",
+            "documents": [{"path": "inputs/manual_results.docx", "sha256": "a" * 64}],
+            "caveats": "Fixture reference set; not ground truth.",
+        },
+        "entries": [
+            {
+                "comparison_id": "REF-CFI",
+                "domain": "fit",
+                "metric": "cfi",
+                "stat_id": "structural.fit.cfi",
+                "reference_value": 0.95,
+                "tolerance": 0.05,
+            },
+            {
+                "comparison_id": "REF-PATH",
+                "domain": "path",
+                "metric": "estimate",
+                "stat_id": "structural.path.RES->CUL",
+                "reference_value": 0.45,
+                "tolerance": 0.1,
+            },
+            {
+                "comparison_id": "REF-REL",
+                "domain": "reliability",
+                "metric": "alpha",
+                "stat_id": "measurement.reliability.RES",
+                "reference_value": 0.80,
+                "tolerance": 0.15,
+            },
+        ],
+    }
+    path = study_dir / "reference_set.yaml"
+    path.write_text(yaml.safe_dump(reference, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def test_live_extract_then_confirm_reaches_completed(tmp_path: Path) -> None:
     study_dir = _build_live_bundle(tmp_path)
     factory = RecordingFactory()
@@ -115,6 +157,8 @@ def test_live_extract_then_confirm_reaches_completed(tmp_path: Path) -> None:
     # The archives are inside the sealed run dir.
     assert (result.run_dir / "llm" / "node_a.0.json").is_file()
     assert (result.run_dir / "llm" / "node_c.0.json").is_file()
+    # No reference set was supplied -> no reference comparison is emitted (item 10).
+    assert not (result.run_dir / "REFERENCE_COMPARISON.md").exists()
 
 
 def test_confirm_without_token_halts_before_gate1(tmp_path: Path) -> None:
@@ -239,3 +283,44 @@ def test_confirm_with_missing_config_halts(tmp_path: Path) -> None:
         live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
     assert factory.calls["node_c"] == 0
     assert not (study_dir / "runs").exists()
+
+
+def test_reference_comparison_is_sealed_and_rerun_reproduces_it(tmp_path: Path) -> None:
+    """TC-16 item 10: with a reference set, the confirmed run emits a SEALED
+    REFERENCE_COMPARISON.md, and rerun regenerates it byte-identically with no
+    provider calls. Fails if the builder call, render, write, seal inclusion, or
+    with-reference rerun identity is removed.
+    """
+    study_dir = _build_live_bundle(tmp_path)
+    reference_path = _write_reference_set(study_dir)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+
+    run = live_confirm(
+        study_dir,
+        reference_path=reference_path,
+        provider_factory=factory,
+        policy=fast_policy(tmp_path),
+    )
+    assert run.state == "COMPLETED"
+
+    report = run.run_dir / "REFERENCE_COMPARISON.md"
+    assert report.is_file()  # write (item 10)
+    text = report.read_text(encoding="utf-8")
+    assert text.startswith("# Reference comparison")  # render
+    for comparison_id in ("REF-CFI", "REF-PATH", "REF-REL"):
+        assert comparison_id in text  # builder resolved each entry against the run's store
+    assert "| Total | 3 |" in text  # builder summary counts
+
+    # The reference-set bytes were copied verbatim into the run tree (for rerun).
+    copied = run.run_dir / "reference" / "reference_set.yaml"
+    assert copied.read_bytes() == reference_path.read_bytes()
+    # Seal inclusion: the sealed run verifies WITH the report present (written pre-seal).
+    Manifest.verify_seal(run.run_dir)
+
+    # Rerun replays archives + reference bytes; regenerates the report byte-identically.
+    node_c_after_confirm = factory.calls["node_c"]
+    rerun = live_rerun(run.run_dir, policy=fast_policy(tmp_path))
+    assert rerun.state == "COMPLETED"
+    assert (rerun.run_dir / "REFERENCE_COMPARISON.md").read_bytes() == report.read_bytes()
+    assert factory.calls["node_c"] == node_c_after_confirm  # rerun made no provider calls

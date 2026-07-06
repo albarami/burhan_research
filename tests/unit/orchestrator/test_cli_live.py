@@ -39,13 +39,30 @@ def test_run_live_extract_routes_and_exits_zero(tmp_path: Path, monkeypatch: Any
 def test_run_live_confirm_routes_and_maps_state(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(
         "burhan.cli.live.live_confirm",
-        lambda study_dir: RunResult(
+        lambda study_dir, reference_path=None: RunResult(
             state="COMPLETED", run_dir=tmp_path / "runs" / "x", report_path=tmp_path / "r"
         ),
     )
     result = runner.invoke(app, ["run", str(tmp_path), "--live", "--confirm"])
     assert result.exit_code == 0
     assert "COMPLETED" in result.output
+
+
+def test_run_live_confirm_forwards_reference_path(tmp_path: Path, monkeypatch: Any) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(study_dir: Path, reference_path: Path | None = None) -> RunResult:
+        seen["reference_path"] = reference_path
+        return RunResult(state="COMPLETED", run_dir=tmp_path, report_path=tmp_path / "r")
+
+    monkeypatch.setattr("burhan.cli.live.live_confirm", fake)
+    reference = tmp_path / "reference_set.yaml"
+    reference.write_text("study_id: s\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(tmp_path), "--live", "--confirm", "--reference", str(reference)]
+    )
+    assert result.exit_code == 0
+    assert seen["reference_path"] == reference  # --reference reaches live_confirm (item 10)
 
 
 def test_run_confirm_without_live_refuses(tmp_path: Path) -> None:
@@ -55,7 +72,7 @@ def test_run_confirm_without_live_refuses(tmp_path: Path) -> None:
 
 
 def test_run_live_halt_maps_to_exit_ten(tmp_path: Path, monkeypatch: Any) -> None:
-    def boom(study_dir: Path) -> RunResult:
+    def boom(study_dir: Path, reference_path: Path | None = None) -> RunResult:
         halt(IntegrityHalt("no pending-glance token", report={}))
 
     monkeypatch.setattr("burhan.cli.live.live_confirm", boom)

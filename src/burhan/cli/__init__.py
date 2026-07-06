@@ -43,6 +43,11 @@ def run(
     confirm: bool = typer.Option(
         False, "--confirm", help="confirm a --live extraction and run the full DAG (TC-16)"
     ),
+    reference: Path | None = typer.Option(  # noqa: B008 — typer's DI idiom (ruff exempts bool, not Path|None)
+        None,
+        "--reference",
+        help="reference-set file: emit the sealed REFERENCE_COMPARISON.md (TC-16 item 10)",
+    ),
 ) -> None:
     """Execute a full study run from a study directory (headless after Gate 1)."""
     if live:
@@ -50,7 +55,7 @@ def run(
 
         try:
             if confirm:
-                result = live_confirm(study_dir)
+                result = live_confirm(study_dir, reference_path=reference)
                 typer.echo(f"run terminal state: {result.state} ({result.run_dir})")
                 raise typer.Exit(
                     code=EXIT_BY_STATE.get(result.state, EXIT_BY_STATE["HALTED_INTEGRITY"])
