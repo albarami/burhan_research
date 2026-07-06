@@ -218,6 +218,40 @@ def test_non_mapping_yaml_halts() -> None:
         node.extract(study_document=_document("listy"))
 
 
+def test_fenced_yaml_response_parses() -> None:  # §7 fix: models wrap YAML in ```yaml fences
+    # A response the model wrapped in a ```yaml … ``` markdown code fence must
+    # still parse: the fence is stripped before schema validation (FR-203).
+    node = _node({"fenced": f"```yaml\n{_faithful_yaml()}```\n"})
+    config = node.extract(study_document=_document("fenced"), min_designed_items=3)
+    assert config.meta.study_id == "example-adoption-2026"
+
+
+def test_fenced_yaml_without_closing_fence_parses() -> None:  # §7 fix (truncation-robust)
+    # A leading ```yaml with no closing fence (e.g. the model omits it) still
+    # parses: only the opening fence line is stripped, the body is untouched.
+    node = _node({"fenced-open": f"```yaml\n{_faithful_yaml()}"})
+    config = node.extract(study_document=_document("fenced-open"), min_designed_items=3)
+    assert config.meta.study_id == "example-adoption-2026"
+
+
+def test_fenced_ambiguous_still_halts_fr205() -> None:  # §7 fix: FR-205 after fence normalization
+    # A fenced AMBIGUOUS: response must still halt FR-205 — the ambiguity check
+    # runs on the de-fenced body, not only on the raw response.
+    node = _node({"amb-fenced": "```\nAMBIGUOUS: item AT9 has no construct in §3.2\n```"})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("amb-fenced"))
+    assert "FR-205" in excinfo.value.message
+    assert "AT9" in str(excinfo.value.to_report()["details"])
+
+
+def test_non_yaml_fence_is_not_stripped() -> None:  # §7 fix: only yaml/yml/bare fences unwrap
+    # A non-YAML fence (```json) is left in place and fails FR-203 — the strip is
+    # scoped to YAML fences, not any fenced content.
+    node = _node({"json-fenced": f"```json\n{_faithful_yaml()}```\n"})
+    with pytest.raises(IntegrityHalt):
+        node.extract(study_document=_document("json-fenced"))
+
+
 def test_schema_invalid_extraction_halts_with_path() -> None:  # FR-203
     def wreck(data: dict[str, Any]) -> None:
         data["hypotheses"][0]["id"] = "X1"

@@ -35,6 +35,12 @@ from burhan.core.errors import IntegrityHalt, halt
 _RAW_DATA_SUFFIXES = (".csv", ".xlsx", ".xls", ".sav", ".dta", ".parquet", ".feather")
 _REQUIRED_NODES = ("node_a", "node_b", "node_c")
 
+# Output-token ceilings. Node A extracts a full study contract, which can
+# exceed the default ceiling and truncate mid-response, so it gets a raised
+# ceiling; every other node retains the default.
+_DEFAULT_MAX_TOKENS = 8192
+_NODE_A_MAX_TOKENS = 16384
+
 
 @dataclass(frozen=True)
 class NodeSettings:
@@ -255,6 +261,7 @@ def resolve_provider_call(settings: LlmSettings, node: str) -> Callable[[str], s
     """
     node_settings = settings.node(node)
     if node_settings.provider == "anthropic":
+        max_tokens = _NODE_A_MAX_TOKENS if node == "node_a" else _DEFAULT_MAX_TOKENS
 
         def call_anthropic(prompt: str) -> str:
             import anthropic
@@ -263,7 +270,7 @@ def resolve_provider_call(settings: LlmSettings, node: str) -> Callable[[str], s
             client = anthropic.Anthropic()
             response = client.messages.create(
                 model=node_settings.model,
-                max_tokens=8192,
+                max_tokens=max_tokens,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}],
             )

@@ -36,6 +36,31 @@ _REVERSE_TOKEN = "reverse"
 _NEGATED_REVERSE = re.compile(r"\bnot\s+reverse")
 
 
+# Whole-response fence tags whose body is unwrapped before parsing; any other
+# language tag is left in place to fail FR-203.
+_YAML_FENCE_LANGS = frozenset({"", "yaml", "yml"})
+
+
+def _strip_code_fence(text: str) -> str:
+    """Unwrap a whole-response YAML markdown code fence if the model added one.
+
+    Models sometimes wrap the YAML contract in a fenced code block. Only a fence
+    tagged ``yaml``/``yml`` or a bare fence is unwrapped (its body is YAML); any
+    other language tag is returned unchanged, to fail FR-203. Strips the opening
+    fence line and a trailing fence line when present — the closing fence is
+    absent when the response was truncated. Deterministic.
+    """
+    if not text.startswith("```"):
+        return text
+    first, _, rest = text.partition("\n")
+    if first[3:].strip().lower() not in _YAML_FENCE_LANGS:
+        return text  # non-YAML fence: leave it to fail FR-203
+    lines = rest.splitlines()
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]  # drop the closing fence line (absent when truncated)
+    return "\n".join(lines)
+
+
 def default_template_path() -> Path:
     """The versioned Node A prompt (AD-04)."""
     return Path(__file__).resolve().parents[3] / "prompts" / "node_a" / "v1.md"
@@ -69,15 +94,16 @@ class NodeA(AdapterBase):
         """Extract, schema-validate, and cross-field-validate the contract."""
         response = self.complete(study_document=study_document, data_dictionary=data_dictionary)
         stripped = response.strip()
-        if stripped.startswith(_AMBIGUOUS_MARKER):
+        body = _strip_code_fence(stripped)  # unwrap a YAML fence before FR-205/FR-203 checks
+        if body.startswith(_AMBIGUOUS_MARKER):
             halt(
                 IntegrityHalt(
                     "extraction ambiguity is a hard failure, never a guess (FR-205)",
-                    report={"reason": stripped},
+                    report={"reason": body},
                 )
             )
         try:
-            raw = yaml.safe_load(stripped)
+            raw = yaml.safe_load(body)
         except yaml.YAMLError as exc:
             halt(
                 IntegrityHalt(
