@@ -1,12 +1,13 @@
 """Burhān CLI (FR-1401): ``run``, ``rerun``, ``certify``, ``doctor``.
 
 One command starts a run; no interactive input is required after Gate 1
-(FR-306 — the orchestrator exposes no input channel at all). After TC-15
-wired the pipeline, ``run``/``rerun`` execute the full 13-stage DAG under
-``--certification`` (the offline certified-workstation path, D2) and refuse
-cleanly without it (real-provider runs land with a later contract); the
-engine never improvises a pipeline (FR-1302 doctrine). Exit codes map
-terminal states: 0 = COMPLETED / COMPLETED_TO_BOUNDARY · 10 = HALTED_INTEGRITY ·
+(FR-306 — the orchestrator exposes no input channel at all). ``run``/``rerun``
+execute the full 13-stage DAG under ``--certification`` (offline canned, D2)
+or ``--live`` (TC-16 real-provider path: ``--live`` extracts the contract for
+the researcher glance, ``--live --confirm`` runs the DAG, ``rerun --live``
+replays the archives). Without a mode flag they refuse cleanly; the engine
+never improvises a pipeline (FR-1302 doctrine). Exit codes map terminal
+states: 0 = COMPLETED / COMPLETED_TO_BOUNDARY · 10 = HALTED_INTEGRITY ·
 11 = HALTED_VERIFICATION · 12 = HALTED_GATE · 1 = doctor not green.
 """
 
@@ -36,12 +37,45 @@ def run(
     certification: bool = typer.Option(
         False, "--certification", help="offline certified-workstation dry run (TC-15/M5, D2)"
     ),
+    live: bool = typer.Option(
+        False, "--live", help="live-provider run (TC-16): extract, then --confirm after the glance"
+    ),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="confirm a --live extraction and run the full DAG (TC-16)"
+    ),
+    reference: Path | None = typer.Option(  # noqa: B008 — typer's DI idiom (ruff exempts bool, not Path|None)
+        None,
+        "--reference",
+        help="reference-set file: emit the sealed REFERENCE_COMPARISON.md (TC-16 item 10)",
+    ),
 ) -> None:
     """Execute a full study run from a study directory (headless after Gate 1)."""
+    if live:
+        from burhan.cli.live import live_confirm, live_extract
+
+        try:
+            if confirm:
+                result = live_confirm(study_dir, reference_path=reference)
+                typer.echo(f"run terminal state: {result.state} ({result.run_dir})")
+                raise typer.Exit(
+                    code=EXIT_BY_STATE.get(result.state, EXIT_BY_STATE["HALTED_INTEGRITY"])
+                )
+            extract = live_extract(study_dir)
+            typer.echo(
+                f"extracted contract -> {extract.config_path}\n"
+                "glance it, then re-run with --live --confirm to run Gate 1 + Stage-1A."
+            )
+            raise typer.Exit(code=0)
+        except BurhanHalt as exc:
+            typer.echo(f"live run halted: {exc.message}")
+            raise typer.Exit(code=EXIT_BY_STATE.get(exc.run_state, 10)) from exc
+    if confirm:
+        typer.echo("no run: --confirm requires --live (TC-16).")
+        raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
     if not certification:
         typer.echo(
-            "no run: real-provider study runs land with a later contract; pass "
-            "--certification for the offline certified-workstation dry run (D2)."
+            "no run: pass --live for a real-provider run (TC-16) or --certification for "
+            "the offline certified-workstation dry run (D2)."
         )
         raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
     from burhan.cli.certification import certification_run
@@ -57,12 +91,27 @@ def rerun(
     certification: bool = typer.Option(
         False, "--certification", help="re-execute a sealed certification run (TC-15/M5, D2)"
     ),
+    live: bool = typer.Option(
+        False, "--live", help="re-execute a sealed live run by replaying archives (TC-16, NFR-101)"
+    ),
 ) -> None:
     """Re-execute a sealed run from its manifest and assert byte-identity."""
+    if live:
+        from burhan.cli.live import live_rerun
+
+        try:
+            result = live_rerun(run_dir)
+            typer.echo(f"rerun terminal state: {result.state} ({result.run_dir})")
+            raise typer.Exit(
+                code=EXIT_BY_STATE.get(result.state, EXIT_BY_STATE["HALTED_INTEGRITY"])
+            )
+        except BurhanHalt as exc:
+            typer.echo(f"live rerun halted: {exc.message}")
+            raise typer.Exit(code=EXIT_BY_STATE.get(exc.run_state, 10)) from exc
     if not certification:
         typer.echo(
-            "no rerun: real-provider runs land with a later contract; pass "
-            "--certification to re-execute a sealed certification run (D2)."
+            "no rerun: pass --live to replay a sealed live run (TC-16) or --certification "
+            "for a sealed certification run (D2)."
         )
         raise typer.Exit(code=EXIT_BY_STATE["HALTED_INTEGRITY"])
     from burhan.cli.certification import certification_rerun
