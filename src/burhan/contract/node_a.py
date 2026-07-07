@@ -19,6 +19,7 @@ enforces what the prompt asks for:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -30,6 +31,33 @@ from burhan.contract.validators import validate_contract
 from burhan.core.artifacts.loader import validate_and_build
 from burhan.core.artifacts.models import StudyConfig
 from burhan.core.errors import IntegrityHalt, halt
+
+
+@dataclass(frozen=True)
+class SourceDocumentRef:
+    """One authoritative ``meta.source_documents`` entry (role, path, file digest)."""
+
+    role: str
+    path: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ContractProvenance:
+    """Authoritative provenance/governance the ENGINE supplies for a Node A contract.
+
+    ``meta.source_documents`` digests and ``methodology.playbook_id`` /
+    ``playbook_version`` are schema-required but NOT derivable by an LLM reading a
+    document — a fabricated file hash is forbidden (FR-206). The prompt instructs Node A
+    to omit them; the live path resolves them from the actual input files and the
+    governed playbook and injects them here, BEFORE schema validation, so
+    ``validate_and_build`` sees a complete, authoritative contract.
+    """
+
+    source_documents: tuple[SourceDocumentRef, ...]
+    playbook_id: str
+    playbook_version: str
+
 
 _AMBIGUOUS_MARKER = "AMBIGUOUS:"
 _REVERSE_TOKEN = "reverse"
@@ -66,6 +94,27 @@ def default_template_path() -> Path:
     return Path(__file__).resolve().parents[3] / "prompts" / "node_a" / "v1.md"
 
 
+def _inject_provenance(raw: dict[str, Any], provenance: ContractProvenance) -> None:
+    """Overwrite the non-LLM-derivable fields with the engine's authoritative values,
+    in place, before schema validation.
+
+    ``meta.source_documents`` and ``methodology.playbook_id``/``playbook_version`` are
+    set to the engine's values regardless of what the model emitted (an LLM-supplied
+    file hash is never trusted). If the model omitted the parent block entirely, the
+    missing-required halt stands — the adapter never fabricates ``meta``/``methodology``.
+    """
+    meta = raw.get("meta")
+    if isinstance(meta, dict):
+        meta["source_documents"] = [
+            {"role": sd.role, "path": sd.path, "sha256": sd.sha256}
+            for sd in provenance.source_documents
+        ]
+    methodology = raw.get("methodology")
+    if isinstance(methodology, dict):
+        methodology["playbook_id"] = provenance.playbook_id
+        methodology["playbook_version"] = provenance.playbook_version
+
+
 class NodeA(AdapterBase):
     """The extraction node: documents in, validated study contract out."""
 
@@ -90,8 +139,17 @@ class NodeA(AdapterBase):
         data_dictionary: str | None = None,
         export_path: Path | None = None,
         min_designed_items: int = 2,
+        provenance: ContractProvenance | None = None,
     ) -> StudyConfig:
-        """Extract, schema-validate, and cross-field-validate the contract."""
+        """Extract, schema-validate, and cross-field-validate the contract.
+
+        ``provenance`` (supplied on the live path) injects the engine's authoritative
+        ``meta.source_documents`` and ``methodology.playbook_id``/``playbook_version``
+        into the raw contract BEFORE schema validation — the adapter never authors those
+        non-LLM-derivable fields (FR-206), and a fabricated file hash is never trusted.
+        Without it the raw model output is validated as-is (a compliant response, which
+        omits those fields, then halts typed on the missing required properties).
+        """
         response = self.complete(study_document=study_document, data_dictionary=data_dictionary)
         stripped = response.strip()
         body = _strip_code_fence(stripped)  # unwrap a YAML fence before FR-205/FR-203 checks
@@ -118,6 +176,8 @@ class NodeA(AdapterBase):
                     report={"type": type(raw).__name__},
                 )
             )
+        if provenance is not None:
+            _inject_provenance(raw, provenance)
         config = validate_and_build(StudyConfig, raw)
         source_reversed = _scan_reversed_sources(
             [item.code for item in config.instrument.items],

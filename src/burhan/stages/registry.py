@@ -31,7 +31,7 @@ from burhan.stages.stub_1b import StubGate2, StubNarrate, StubPackage
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from burhan.contract.node_a import NodeA
+    from burhan.contract.node_a import ContractProvenance, NodeA
     from burhan.core.playbook import Playbook
     from burhan.core.policy import Policy
     from burhan.core.registry import Registry as DecisionRegistry
@@ -51,6 +51,7 @@ def production_registry(
     data_dictionary: str | None = None,
     montecarlo_replications: int | None = None,
     marker_items: list[str] | None = None,
+    provenance: ContractProvenance | None = None,
 ) -> dict[str, Stage]:
     """Every fixed-DAG stage, keyed by name, in DAG order (AT-M15-4).
 
@@ -60,7 +61,12 @@ def production_registry(
     """
     stages: list[Stage] = [
         Ingest(export_path=export_path, header_rows=header_rows),
-        Contract(node_a=node_a, study_document=study_document, data_dictionary=data_dictionary),
+        Contract(
+            node_a=node_a,
+            study_document=study_document,
+            data_dictionary=data_dictionary,
+            provenance=provenance,
+        ),
         Gate1(node_c=node_c, study_document=study_document),
         Power(policy=policy, playbook=playbook, montecarlo_replications=montecarlo_replications),
         Prep(export_path=export_path, policy=policy, playbook=playbook),

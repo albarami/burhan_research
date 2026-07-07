@@ -49,7 +49,7 @@ from burhan.contract.llm_base import (
     load_llm_settings,
     resolve_provider_call,
 )
-from burhan.contract.node_a import NodeA
+from burhan.contract.node_a import ContractProvenance, NodeA, SourceDocumentRef
 from burhan.core.artifacts.canonical import dumps
 from burhan.core.artifacts.clock import Clock
 from burhan.core.artifacts.loader import validate_and_build
@@ -60,6 +60,7 @@ from burhan.core.playbook import Playbook, playbooks_dir
 from burhan.core.policy import Policy, governance_dir
 from burhan.core.registry import Registry
 from burhan.results.store import ResultsStore
+from burhan.stages.context import CONTRACT_CONFIG
 from burhan.stages.registry import production_registry
 from burhan.verify.reference_comparison import (
     build_reference_comparison,
@@ -131,6 +132,66 @@ def _resolve_inputs(study_dir: Path) -> tuple[Path, Path | None, Path]:
     return study_doc, data_dict, exports[0]
 
 
+def _governed_playbook_identity() -> tuple[str, str]:
+    """The authoritative ``(playbook_id, playbook_version)`` read from the governed
+    playbook the engine binds — never LLM-authored, never hard-coded here. A
+    certification-mode load reads ``meta.id``/``meta.version`` without the decision
+    policy.
+    """
+    playbook = Playbook.load(playbooks_dir() / _PLAYBOOK, mode="certification")
+    return playbook.id, playbook.version
+
+
+def _resolve_provenance(study_dir: Path) -> ContractProvenance:
+    """The engine's authoritative provenance/governance for a Node A contract: real
+    source-document digests computed from the resolved input files, and the governed
+    playbook identity. Node A is instructed to omit these; the engine injects them
+    here (never fabricated) before schema validation.
+    """
+    study_doc, dict_doc, _export = _resolve_inputs(study_dir)
+    source_documents = [
+        SourceDocumentRef(
+            role="study_document",
+            path=study_doc.relative_to(study_dir).as_posix(),
+            sha256=_sha256(study_doc),
+        )
+    ]
+    if dict_doc is not None:
+        source_documents.append(
+            SourceDocumentRef(
+                role="data_dictionary",
+                path=dict_doc.relative_to(study_dir).as_posix(),
+                sha256=_sha256(dict_doc),
+            )
+        )
+    playbook_id, playbook_version = _governed_playbook_identity()
+    return ContractProvenance(
+        source_documents=tuple(source_documents),
+        playbook_id=playbook_id,
+        playbook_version=playbook_version,
+    )
+
+
+def _provenance_from_config(config: StudyConfig) -> ContractProvenance:
+    """Read the authoritative provenance/governance ALREADY recorded in a persisted
+    contract.
+
+    Provenance is authored ONCE (``_resolve_provenance`` at extraction) and thereafter
+    carried forward from the glanced (confirm) or sealed (rerun) config — never
+    recomputed from mutable study-bundle files. This keeps the run contract from
+    drifting away from what was glanced-and-approved (the glance boundary) and keeps a
+    rerun byte-identical to its sealed source (NFR-101).
+    """
+    return ContractProvenance(
+        source_documents=tuple(
+            SourceDocumentRef(role=sd.role, path=sd.path, sha256=sd.sha256)
+            for sd in config.meta.source_documents
+        ),
+        playbook_id=config.methodology.playbook_id,
+        playbook_version=config.methodology.playbook_version,
+    )
+
+
 def live_extract(
     study_dir: Path,
     *,
@@ -153,7 +214,11 @@ def live_extract(
             provider_factory(settings, "node_a"), pending, "node_a"
         ),
     )
-    config = node_a.extract(study_document=study_document, data_dictionary=data_dictionary)
+    config = node_a.extract(
+        study_document=study_document,
+        data_dictionary=data_dictionary,
+        provenance=_resolve_provenance(study_dir),
+    )
 
     config_path = _config_path(study_dir)
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,7 +273,7 @@ def _verify_token(pending: Path, config_path: Path) -> None:
 
 
 def _build_live_registry(
-    study_dir: Path,
+    config: StudyConfig,
     export_path: Path,
     study_document: str,
     data_dictionary: str | None,
@@ -216,9 +281,8 @@ def _build_live_registry(
     node_c: Any,
     policy: Policy,
 ) -> tuple[dict[str, Stage], StudyConfig]:
-    config = validate_and_build(
-        StudyConfig, yaml.safe_load(_config_path(study_dir).read_text(encoding="utf-8"))
-    )
+    # ``config`` is the persisted contract to run against (glanced on confirm, sealed on
+    # rerun); provenance is read from it, never recomputed from mutable input files.
     header_rows = config.data.header_rows if config.data.header_rows is not None else 3
     playbook = Playbook.load(playbooks_dir() / _PLAYBOOK, mode="certification", policy=policy)
     decision_registry = Registry.load(
@@ -234,6 +298,7 @@ def _build_live_registry(
         playbook=playbook,
         registry=decision_registry,
         data_dictionary=data_dictionary,
+        provenance=_provenance_from_config(config),
     )
     return registry, config
 
@@ -410,6 +475,9 @@ def live_confirm(
     pending = _pending_dir(study_dir)
     config_path = _config_path(study_dir)
     _verify_token(pending, config_path)  # halts BEFORE any run dir / Gate 1 (AT-M16-3)
+    glanced_config = validate_and_build(  # what runs must equal what was glanced
+        StudyConfig, yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    )
 
     settings = _load_settings(study_dir)
     study_doc, dict_doc, export_path = _resolve_inputs(study_dir)
@@ -436,7 +504,7 @@ def live_confirm(
         ),
     )
     registry, _config = _build_live_registry(
-        study_dir, export_path, study_document, data_dictionary, node_a, node_c, the_policy
+        glanced_config, export_path, study_document, data_dictionary, node_a, node_c, the_policy
     )
     if reference_path is not None:  # item 10: emit the sealed reference comparison
         registry = _with_reference_stage(registry, _record_reference(reference_path), run_id)
@@ -447,6 +515,9 @@ def live_confirm(
 def live_rerun(run_dir: Path, *, policy: Policy | None = None) -> RunResult:
     """Re-execute a sealed live run by replaying archives; no provider call (NFR-101)."""
     study_dir = run_dir.parent.parent
+    sealed_config = validate_and_build(  # provenance from the SEALED contract (NFR-101)
+        StudyConfig, json.loads((run_dir / CONTRACT_CONFIG).read_text(encoding="utf-8"))
+    )
     settings = _load_settings(study_dir)
     study_doc, dict_doc, export_path = _resolve_inputs(study_dir)
     study_document = document_to_text(study_doc)
@@ -468,7 +539,7 @@ def live_rerun(run_dir: Path, *, policy: Policy | None = None) -> RunResult:
         provider_call=replay_provider_call(source_llm, "node_c", mirror_dir=target_llm),
     )
     registry, _config = _build_live_registry(
-        study_dir, export_path, study_document, data_dictionary, node_a, node_c, the_policy
+        sealed_config, export_path, study_document, data_dictionary, node_a, node_c, the_policy
     )
     if _reference_dir(run_dir).is_dir():  # source ran with a reference set: replay it
         registry = _with_reference_stage(registry, _replay_reference(run_dir), run_dir.name)
