@@ -142,6 +142,69 @@ def test_v5_indirect_chain_must_be_reachable() -> None:  # V5
     assert "H4b" in str(excinfo.value.to_report()["details"])
 
 
+# PU and ATT below stand in for two PARALLEL mediators (the DBA study's A_PEOU, A_PU):
+# each independently carries ENB -> INT. These lock the V5 semantics the §7 prompt
+# correction teaches Node A — serializing parallel siblings halts; splitting passes.
+
+
+def test_v5_serialized_parallel_mediators_halt() -> None:  # V5 (DBA incident shape)
+    # Two parallel mediators (PU, ATT), each ENB -> mediator -> INT. Serializing them into
+    # one via [PU, ATT] fabricates a phantom PU->ATT direct link that no hypothesis declares
+    # — the exact DBA defect (via [A_PEOU, A_PU] => phantom A_PEOU->A_PU). V5 must halt.
+    def serialize_parallel(data: dict[str, Any]) -> None:
+        data["hypotheses"] = [
+            {"id": "H1", "effect": "direct", "from": "ENB", "to": "PU", "sign": "positive"},
+            {"id": "H2", "effect": "direct", "from": "ENB", "to": "ATT", "sign": "positive"},
+            {"id": "H3", "effect": "direct", "from": "PU", "to": "INT", "sign": "positive"},
+            {"id": "H4", "effect": "direct", "from": "ATT", "to": "INT", "sign": "positive"},
+            {  # WRONG: parallel siblings serialized into one chain
+                "id": "H5",
+                "effect": "indirect",
+                "from": "ENB",
+                "to": "INT",
+                "via": ["PU", "ATT"],
+                "sign": "positive",
+            },
+        ]
+
+    with pytest.raises(IntegrityHalt) as excinfo:
+        v5_hypotheses(example_config(serialize_parallel))
+    assert "V5" in excinfo.value.message
+    details = excinfo.value.to_report()["details"]
+    assert details["hypothesis"] == "H5"
+    assert "PU->ATT" in details["missing_links"]  # the phantom sibling-to-sibling edge
+
+
+def test_v5_split_parallel_indirect_paths_pass() -> None:  # V5 (correct representation)
+    # The SAME parallel mediation, represented correctly: one indirect hypothesis per
+    # reachable single-mediator path. Every chain's links are declared direct — V5 passes.
+    def split_parallel(data: dict[str, Any]) -> None:
+        data["hypotheses"] = [
+            {"id": "H1", "effect": "direct", "from": "ENB", "to": "PU", "sign": "positive"},
+            {"id": "H2", "effect": "direct", "from": "ENB", "to": "ATT", "sign": "positive"},
+            {"id": "H3", "effect": "direct", "from": "PU", "to": "INT", "sign": "positive"},
+            {"id": "H4", "effect": "direct", "from": "ATT", "to": "INT", "sign": "positive"},
+            {  # ENB -> PU -> INT, both links declared
+                "id": "H5a",
+                "effect": "indirect",
+                "from": "ENB",
+                "to": "INT",
+                "via": ["PU"],
+                "sign": "positive",
+            },
+            {  # ENB -> ATT -> INT, both links declared
+                "id": "H5b",
+                "effect": "indirect",
+                "from": "ENB",
+                "to": "INT",
+                "via": ["ATT"],
+                "sign": "positive",
+            },
+        ]
+
+    v5_hypotheses(example_config(split_parallel))  # no raise: every chain is reachable
+
+
 def test_v6_delegates_to_the_crosswalk() -> None:  # V6 (TC-05 accounting)
     from ingest_fixture_config import base_config, base_dict
 

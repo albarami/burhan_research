@@ -470,6 +470,28 @@ def test_prompt_routes_structural_edges_to_hypotheses_not_model() -> None:  # di
     assert "key is `sign`, not `direction`" in prompt
 
 
+# -- §7 correction (Node A mediation via semantics) ------------------------------------
+# The live DBA run reached V5 (schema + V1-V4 passed) and halted: Node A serialized two
+# PARALLEL mediators (A_PEOU, A_PU) into one indirect `via` [A_PEOU, A_PU, A_ATT],
+# inventing a phantom A_PEOU->A_PU direct edge no hypothesis declared. v1.md described
+# `via` only as "an array of mediator construct codes" — silent on the V5 rule that a
+# via is ONE reachable chain whose consecutive links must all be declared direct
+# hypotheses, and that parallel siblings must be split into separate indirect paths.
+
+
+def test_prompt_defines_via_as_single_reachable_chain_and_forbids_parallel_serialization() -> None:
+    # Prohibition + rule: `via` is one structurally reachable path whose consecutive links
+    # are each a declared effect:direct hypothesis; parallel sibling mediators must never be
+    # serialized into one via, and route to separate indirect hypotheses instead. A prompt
+    # that still called via "an array of mediator construct codes" fails these.
+    prompt = _prompt_prohibitions()
+    assert "structurally reachable indirect path" in prompt
+    assert "each consecutive link in the chain" in prompt
+    assert "must also appear as a declared `effect: direct` hypothesis" in prompt
+    assert "never serialize parallel sibling mediators into one `via` list" in prompt
+    assert "separate indirect hypotheses, one per reachable path" in prompt
+
+
 def test_prompt_binds_meta_and_forbids_fabricated_provenance() -> None:
     # study_id is a slug (the incident used `dba_validation_qatar_ai`); source_documents
     # is engine-supplied provenance the LLM must never fabricate (it cannot hash files).
