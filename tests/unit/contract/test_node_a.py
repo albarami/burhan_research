@@ -492,6 +492,61 @@ def test_prompt_defines_via_as_single_reachable_chain_and_forbids_parallel_seria
     assert "separate indirect hypotheses, one per reachable path" in prompt
 
 
+# -- §7 exhaustive pass (close EVERY schema/validator gap in one correction) ------------
+# Seventh sequential live-halt = hypothesis-id grammar (`H6b_via_PU`). The standing
+# meta-test (test_prompt_schema_coverage) mechanically enumerates all constraints; the
+# per-gap prompt-contract tests below pin each of the six gaps that pass found, each RED
+# on the pre-edit prompt.
+
+
+def test_prompt_binds_hypothesis_id_grammar_and_split_naming() -> (
+    None
+):  # gap: hypotheses[].id + V5-unique
+    # Live halt: Node A named split indirect hypotheses `H6b_via_PU` (violates ^H[0-9]+[a-z]?$).
+    # The prompt must state the grammar, forbid descriptive suffixes, give conforming split ids,
+    # and require uniqueness. The prior "of the form H1, H2, H4a" examples fail these.
+    prompt = _prompt_prohibitions()
+    assert "an `h` followed by one or more digits and an optional single lowercase letter" in prompt
+    assert "never a descriptive suffix" in prompt
+    assert "appending the next unused lowercase letter" in prompt  # how to name split paths
+    assert "each hypothesis `id` is unique" in prompt
+
+
+def test_prompt_omits_created_timestamp() -> None:  # gap: meta.created UtcSeconds trap
+    # `created` is optional but strictly UTC whole-second (models.UtcSeconds); an LLM date
+    # trips it. The prompt must tell Node A to omit it (the engine records timestamps).
+    assert "do not emit `created`" in _prompt_prohibitions()
+
+
+def test_prompt_requires_nonempty_structural_roles() -> (
+    None
+):  # gap: model.exogenous/endogenous minItems
+    assert "at least one exogenous" in _prompt_prohibitions()
+
+
+def test_prompt_requires_higher_order_when_any_second_order() -> None:  # gap: V3 biconditional
+    # V3 halts if a second_order construct exists without a higher_order block. The prompt
+    # stated only "present only if second-order"; it must also state the required direction.
+    assert "required if any construct is second-order" in _prompt_prohibitions()
+
+
+def test_prompt_declares_data_dictionary_authoritative() -> None:  # gap: FR-204
+    assert "the data dictionary is authoritative" in _prompt_prohibitions()
+
+
+def test_descriptive_hypothesis_id_reproduces_the_schema_halt() -> None:  # §7 (id) incident repro
+    # The exact seventh live halt: a hypothesis id with a descriptive suffix violates the
+    # schema pattern ^H[0-9]+[a-z]?$ and halts before any cross-field validator.
+    def descriptive_id(data: dict[str, Any]) -> None:
+        data["hypotheses"][0]["id"] = "H1_via_PU"
+
+    node = _node({"desc-id": _mutated_yaml(descriptive_id)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("desc-id"), min_designed_items=3)
+    details = excinfo.value.to_report()["details"]
+    assert "hypotheses" in details["path"] and details["path"].endswith(".id")
+
+
 def test_prompt_binds_meta_and_forbids_fabricated_provenance() -> None:
     # study_id is a slug (the incident used `dba_validation_qatar_ai`); source_documents
     # is engine-supplied provenance the LLM must never fabricate (it cannot hash files).
