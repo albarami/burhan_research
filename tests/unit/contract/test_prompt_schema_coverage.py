@@ -40,6 +40,15 @@ from prompt_coverage import (
     schema_constraints,
 )
 
+# TODO(DF-001, docs/DEFERRED_FOLLOWUPS.md): DEFERRED hardening of this meta-test.
+# The reopening negative controls below cover the context-specific COVERED rows,
+# but NOT the EXCLUDED schema `type` rows (scale.labels, metadata_columns,
+# ignored_item_columns): deleting a prompt phrase reopens zero rows for them, and
+# the type:string EXCLUDED rationale (test_excluded_type_classes_*) is imprecise.
+# Closing DF-001 adds per-path type-row negative controls and a precise/covered
+# type:string rationale. Not an M6 correctness blocker — Node A already produces a
+# schema-valid study_config; this only strengthens the guard-of-the-guard.
+
 
 def test_no_unmapped_schema_or_validator_constraints() -> None:
     unmapped = [key for key, status, _ in coverage_rows() if status == UNMAPPED]
