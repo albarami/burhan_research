@@ -328,3 +328,112 @@ def test_node_a_prompt_manifest_entry() -> None:  # AT-M06-6 at node level
     entry = node.prompt_manifest()
     assert entry["version"] == "v1"
     assert len(entry["sha256"]) == 64
+
+
+# -- §7 correction (Node A schema-contract) -------------------------------------------
+# Live DBA run halted "non-string dict key in canonical payload". Root cause: v1.md
+# deferred the entire output shape to a schema the model never sees, so Node A
+# invented `instrument.scale_range.anchors: {1:.., 7:..}` (numeric keys → canonical
+# halt), top-level `out_of_model` / `reference_comparison`, and `study` in place of
+# meta/methodology/model. The prompt/input-contract must carry the schema's shape;
+# the engine already rejects each drifted shape (pinned below).
+
+
+def _rendered_node_a_prompt() -> str:
+    """The prompt Node A actually sends — the schema contract must live here."""
+    provider = StubProvider({"faithful": _faithful_yaml()})
+    node = NodeA(_settings(), provider_call=provider)
+    node.extract(study_document=_document("faithful"), min_designed_items=3)
+    return provider.prompts[0]
+
+
+def _prompt_prohibitions() -> str:
+    """Rendered prompt, whitespace-collapsed and lowercased so exact-phrase
+    prohibition assertions are robust to markdown line wrapping."""
+    return " ".join(_rendered_node_a_prompt().split()).lower()
+
+
+def test_prompt_declares_exact_schema_top_level_keys() -> None:  # §7 (b)
+    # Every allowed study_config top-level key must be named, tied to the real model
+    # so the shape cannot be hallucinated (the incident used `study`, `out_of_model`,
+    # `reference_comparison` and omitted meta/methodology/model).
+    from burhan.core.artifacts.models import StudyConfig
+
+    prompt = _rendered_node_a_prompt()
+    for key in StudyConfig.model_fields:  # the 11 governed top-level keys
+        assert key in prompt, f"prompt must name allowed top-level key {key!r}"
+
+
+def test_prompt_binds_scale_labels_and_forbids_numeric_anchors() -> None:  # §7 (a)
+    # Prohibition, not vocabulary: the prompt must FORBID a numeric-keyed anchors map and
+    # a nested shared scale_range, and route anchors to scale.labels. A prompt that told
+    # the model to emit those structures would fail these assertions.
+    prompt = _prompt_prohibitions()
+    assert "labels` array of strings" in prompt  # anchors home = scale.labels string array
+    assert "never use a numeric-keyed `anchors` map" in prompt
+    assert "never nest a shared `instrument.scale_range`" in prompt
+    assert "must parse as a string" in prompt  # not the contradictory "must be quoted"
+
+
+def test_prompt_routes_out_of_model_to_ignored_item_columns() -> None:  # §7 (c: out-of-model)
+    # Prohibition + correct target: out-of-model -> data.ignored_item_columns, and the
+    # prompt must forbid a top-level out_of_model key.
+    prompt = _prompt_prohibitions()
+    assert "ignored_item_columns" in prompt
+    assert "never create a top-level `out_of_model` key" in prompt
+
+
+def test_prompt_forbids_reference_and_retained_subset_material() -> None:  # §7 (c)
+    # Prohibition: the prompt must forbid a reference_comparison block and any retained
+    # subset (FR-202). Fails if the prompt instructed the model to emit that material.
+    prompt = _prompt_prohibitions()
+    assert "never emit a `reference_comparison` block" in prompt
+    assert "never emit a retained subset of items" in prompt
+    assert "fr-202" in prompt
+
+
+def test_numeric_anchor_keys_reproduce_the_canonical_halt() -> None:  # §7 (a) incident repro
+    # The exact live incident: instrument.scale_range.anchors with unquoted integer
+    # keys → YAML int keys → canonical front door halts before schema validation.
+    def inject_numeric_anchors(data: dict[str, Any]) -> None:
+        data["instrument"]["scale_range"] = {
+            "min": 1,
+            "max": 7,
+            "anchors": {1: "Strongly Disagree", 7: "Strongly Agree"},
+        }
+
+    node = _node({"numeric-anchors": _mutated_yaml(inject_numeric_anchors)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("numeric-anchors"), min_designed_items=3)
+    assert excinfo.value.message == "non-string dict key in canonical payload"
+
+
+def test_extra_top_level_out_of_model_key_rejected() -> None:  # §7 (b/c) incident repro
+    def add_out_of_model(data: dict[str, Any]) -> None:
+        data["out_of_model"] = [{"section": "Financial Resources", "items": ["R1", "R2"]}]
+
+    node = _node({"oom": _mutated_yaml(add_out_of_model)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("oom"), min_designed_items=3)
+    assert excinfo.value.to_report()["details"]["path"] == "$"
+
+
+def test_extra_top_level_reference_comparison_key_rejected() -> None:  # §7 (c) incident repro
+    def add_reference(data: dict[str, Any]) -> None:
+        data["reference_comparison"] = {"paper_retained_items": {"R_TI": ["R9", "R10"]}}
+
+    node = _node({"ref": _mutated_yaml(add_reference)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("ref"), min_designed_items=3)
+    assert excinfo.value.to_report()["details"]["path"] == "$"
+
+
+def test_extra_top_level_study_key_rejected() -> None:  # §7 (b) incident repro
+    # The observed top-level drift: a `study` key in place of meta/methodology.
+    def add_study(data: dict[str, Any]) -> None:
+        data["study"] = {"title": "AI readiness", "methodology": "CB_SEM"}
+
+    node = _node({"study-toplevel": _mutated_yaml(add_study)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("study-toplevel"), min_designed_items=3)
+    assert excinfo.value.to_report()["details"]["path"] == "$"
