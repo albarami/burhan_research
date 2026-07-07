@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
     import pandas as pd  # type: ignore[import-untyped]
 
-    from burhan.contract.node_a import NodeA
+    from burhan.contract.node_a import ContractProvenance, NodeA
     from burhan.core.artifacts.models import StudyConfig
     from burhan.core.compliance import Compliance
     from burhan.core.orchestrator import StageContext
@@ -197,15 +197,23 @@ class Contract:
     produces: tuple[str, ...] = (context.CONTRACT_CONFIG,)
 
     def __init__(
-        self, *, node_a: NodeA, study_document: str, data_dictionary: str | None = None
+        self,
+        *,
+        node_a: NodeA,
+        study_document: str,
+        data_dictionary: str | None = None,
+        provenance: ContractProvenance | None = None,
     ) -> None:
         self._node_a = node_a
         self._study_document = study_document
         self._data_dictionary = data_dictionary
+        self._provenance = provenance
 
     def execute(self, ctx: StageContext) -> None:
         config = self._node_a.extract(
-            study_document=self._study_document, data_dictionary=self._data_dictionary
+            study_document=self._study_document,
+            data_dictionary=self._data_dictionary,
+            provenance=self._provenance,
         )
         context.write_config(ctx, config)
 

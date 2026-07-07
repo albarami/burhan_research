@@ -9,8 +9,10 @@ touches no network.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -93,6 +95,22 @@ def _build_live_bundle(tmp_path: Path) -> Path:
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _mutate_docx_bytes(path: Path) -> None:
+    """Change a .docx file's BYTES (a core property) without changing the extracted
+    paragraph text: ``document_to_text`` output is identical, but the sha256 differs.
+    Models input-file drift after the glance (the token binds only the config + Node A
+    archive, not the input files)."""
+    from burhan.contract.documents import document_to_text
+
+    before_hash = _sha(path)
+    before_text = document_to_text(path)
+    doc = Document(str(path))
+    doc.core_properties.author = "provenance-drift"
+    doc.save(str(path))
+    assert _sha(path) != before_hash  # the bytes really changed
+    assert document_to_text(path) == before_text  # but the extracted text did not
 
 
 def _write_reference_set(study_dir: Path) -> Path:
@@ -324,3 +342,119 @@ def test_reference_comparison_is_sealed_and_rerun_reproduces_it(tmp_path: Path) 
     assert rerun.state == "COMPLETED"
     assert (rerun.run_dir / "REFERENCE_COMPARISON.md").read_bytes() == report.read_bytes()
     assert factory.calls["node_c"] == node_c_after_confirm  # rerun made no provider calls
+
+
+def test_live_extract_injects_authoritative_provenance(tmp_path: Path) -> None:
+    """The combined §7 fix: a Node A response omitting the non-LLM-derivable fields is
+    completed by the engine into a schema-valid config — real source_documents (role,
+    path, computed sha256 of the actual input files) and the governed playbook identity.
+    Fails if the injection is removed (extract would halt on the missing required
+    fields) or draws them from anywhere but the resolved inputs / governed playbook.
+    """
+    study_dir = _build_live_bundle(tmp_path)
+    # Node A omits meta.source_documents and methodology.playbook_id/version, exactly as
+    # the corrected prompt instructs (the model cannot hash files or know governance ids).
+    trimmed = copy.deepcopy(integration_config())
+    trimmed["meta"].pop("source_documents", None)
+    trimmed["methodology"].pop("playbook_id", None)
+    trimmed["methodology"].pop("playbook_version", None)
+    response = yaml.safe_dump(trimmed, sort_keys=False)
+
+    calls = {"node_a": 0}
+
+    def factory(settings: LlmSettings, node: str) -> Callable[[str], str]:
+        def call(prompt: str) -> str:
+            calls["node_a"] += 1
+            return response
+
+        return call
+
+    live_extract(study_dir, provider_factory=factory)
+    assert calls["node_a"] == 1
+    config = yaml.safe_load(
+        (study_dir / "config" / "study_config.yaml").read_text(encoding="utf-8")
+    )
+    sds = config["meta"]["source_documents"]
+    by_role = {d["role"]: d for d in sds}
+    assert set(by_role) == {"study_document", "data_dictionary"}  # both resolved inputs
+    assert by_role["study_document"]["path"] == "inputs/study_document.docx"
+    # authoritative: the sha256 is the ACTUAL digest of the actual input file
+    assert by_role["study_document"]["sha256"] == _sha(study_dir / "inputs" / "study_document.docx")
+    assert by_role["data_dictionary"]["sha256"] == _sha(
+        study_dir / "inputs" / "data_dictionary.docx"
+    )
+    for entry in sds:
+        assert re.fullmatch(r"[a-f0-9]{64}", entry["sha256"])  # real 64-hex, not fabricated
+    # governed playbook identity, resolved from the playbook the engine binds
+    assert config["methodology"]["playbook_id"] == "CB_SEM_PLAYBOOK"
+    assert config["methodology"]["playbook_version"] == "1.0"
+
+
+def test_governed_playbook_identity_matches_playbook_metadata() -> None:
+    # The playbook identity is read from the governed playbook's own metadata — never
+    # the LLM output, never hard-coded prompt text.
+    from burhan.cli.live import _governed_playbook_identity
+    from burhan.core.playbook import playbooks_dir
+
+    playbook_id, playbook_version = _governed_playbook_identity()
+    meta = yaml.safe_load(
+        (playbooks_dir() / "CB_SEM_PLAYBOOK_v1.0.yaml").read_text(encoding="utf-8")
+    )["meta"]
+    assert (playbook_id, playbook_version) == (meta["id"], meta["version"])
+
+
+def _run_contract(run_dir: Path) -> dict:
+    return json.loads((run_dir / "contract" / "study_config.json").read_text(encoding="utf-8"))
+
+
+def _glanced_config(study_dir: Path) -> dict:
+    return yaml.safe_load((study_dir / "config" / "study_config.yaml").read_text(encoding="utf-8"))
+
+
+def test_confirm_injects_persisted_glanced_provenance_not_recomputed(tmp_path: Path) -> None:
+    """Glance boundary: what runs must equal what was glanced. If input DOCX bytes drift
+    after the glance, confirm must carry the PERSISTED glanced provenance into the run
+    contract — never recompute a fresh hash from the now-mutated file. Fails on
+    recompute-at-confirm (the run contract would carry the drifted hash)."""
+    study_dir = _build_live_bundle(tmp_path)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+    glanced = _glanced_config(study_dir)
+    _mutate_docx_bytes(study_dir / "inputs" / "study_document.docx")  # drift after the glance
+
+    run = live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
+    contract = _run_contract(run.run_dir)
+    assert contract["meta"]["source_documents"] == glanced["meta"]["source_documents"]
+    assert contract["methodology"]["playbook_id"] == glanced["methodology"]["playbook_id"]
+    assert contract["methodology"]["playbook_version"] == glanced["methodology"]["playbook_version"]
+
+
+def test_run_contract_equals_glanced_config_for_provenance(tmp_path: Path) -> None:
+    # Invariant lock: with no drift, the run contract equals the glanced config for the
+    # engine-supplied provenance/governance (one-directional flow, authored once).
+    study_dir = _build_live_bundle(tmp_path)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+    run = live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
+    glanced = _glanced_config(study_dir)
+    contract = _run_contract(run.run_dir)
+    assert contract["meta"]["source_documents"] == glanced["meta"]["source_documents"]
+    assert contract["methodology"] == glanced["methodology"]
+
+
+def test_rerun_provenance_from_sealed_contract_not_mutable_bundle(tmp_path: Path) -> None:
+    """NFR-101: rerun reproduces the SEALED run. Provenance must come from the sealed run
+    contract, not a fresh hash of the (mutable) study bundle. Fails on recompute-at-rerun
+    (byte-identity breaks, or the rerun contract carries the drifted hash)."""
+    study_dir = _build_live_bundle(tmp_path)
+    factory = RecordingFactory()
+    live_extract(study_dir, provider_factory=factory)
+    run = live_confirm(study_dir, provider_factory=factory, policy=fast_policy(tmp_path))
+    sealed = _run_contract(run.run_dir)
+    _mutate_docx_bytes(study_dir / "inputs" / "study_document.docx")  # drift after the seal
+
+    rerun = live_rerun(run.run_dir, policy=fast_policy(tmp_path))
+    assert (
+        _run_contract(rerun.run_dir)["meta"]["source_documents"]
+        == sealed["meta"]["source_documents"]
+    )

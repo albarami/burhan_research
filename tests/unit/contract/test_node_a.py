@@ -437,3 +437,198 @@ def test_extra_top_level_study_key_rejected() -> None:  # §7 (b) incident repro
     with pytest.raises(IntegrityHalt) as excinfo:
         node.extract(study_document=_document("study-toplevel"), min_designed_items=3)
     assert excinfo.value.to_report()["details"]["path"] == "$"
+
+
+# -- §7 follow-up (Node A full-schema contract) ----------------------------------------
+# The live `$.model.paths` halt was only jsonschema's best-match: the SAME response
+# carried 255 violations, because the prompt under-specified EVERY block and Node A
+# hallucinated a plausible key for each — `construct` for `construct_ref`, `direction`
+# for `sign`, `label`/`parent` on constructs, `approach`/`estimation` on methodology,
+# `higher_order` as a list, `source_documents` as title strings, `study_id` with
+# underscores. Fixing only `model.paths` would have surfaced the next block's halt.
+# The prompt now enumerates every block; the prompt-contract tests below pin that
+# enumeration (each RED on the pre-edit prompt), and the per-block locks pin that the
+# engine already rejects each observed drift at its exact JSON path.
+
+
+def test_prompt_enumerates_model_roles_and_forbids_edge_lists() -> None:  # directive (1)
+    # Prohibition, not vocabulary: the five role sub-keys are enumerated AND a from/to
+    # edge list under `model` is forbidden — a prompt that told the model to emit
+    # `model.paths` would fail this.
+    prompt = _prompt_prohibitions()
+    for role in ("exogenous", "endogenous", "mediators", "moderators", "controls"):
+        assert role in prompt, f"model role {role!r} must be enumerated"
+    assert "never emit `model.paths`, `model.edges`, `model.relationships`" in prompt
+    assert "classifies constructs by role" in prompt
+    assert "does not encode path edges" in prompt
+
+
+def test_prompt_routes_structural_edges_to_hypotheses_not_model() -> None:  # directive (2)
+    prompt = _prompt_prohibitions()
+    assert "structural path edges are expressed" in prompt
+    assert "never under `model`" in prompt
+    assert "key is `sign`, not `direction`" in prompt
+
+
+def test_prompt_binds_meta_and_forbids_fabricated_provenance() -> None:
+    # study_id is a slug (the incident used `dba_validation_qatar_ai`); source_documents
+    # is engine-supplied provenance the LLM must never fabricate (it cannot hash files).
+    prompt = _prompt_prohibitions()
+    assert "no underscores" in prompt
+    assert "do not emit `source_documents`" in prompt
+    assert "never fabricate" in prompt
+
+
+def test_prompt_binds_methodology_and_forbids_invented_fields() -> None:
+    prompt = _prompt_prohibitions()
+    assert "cb_sem" in prompt
+    assert "cross_sectional" in prompt
+    assert "playbook_id" in prompt and "playbook_version" in prompt
+    assert "never emit an `estimator`, `estimation`, `approach`" in prompt
+
+
+def test_prompt_binds_instrument_item_construct_ref() -> None:
+    prompt = _prompt_prohibitions()
+    assert "the key is `construct_ref`, not `construct`" in prompt
+
+
+def test_prompt_binds_construct_fields_and_forbids_extras() -> None:
+    prompt = _prompt_prohibitions()
+    for key in ("code", "name", "level", "measurement", "indicators", "components"):
+        assert key in prompt
+    assert "first_order" in prompt and "second_order" in prompt
+    assert "never `label`, `order`, `parent`, or `deletion_locked`" in prompt
+
+
+def test_prompt_binds_higher_order_as_object_not_list() -> None:
+    prompt = _prompt_prohibitions()
+    assert "an object (never a list)" in prompt
+    assert "repeated_indicator" in prompt and "structural_carry" in prompt
+
+
+def test_prompt_binds_data_fields_and_forbids_extras() -> None:
+    prompt = _prompt_prohibitions()
+    assert "never `target_population`" in prompt
+    assert "entry has exactly `code`, `column_hint`, and `type`" in prompt
+
+
+def test_prompt_binds_crosswalk_and_protected_overrides() -> None:
+    prompt = _prompt_prohibitions()
+    assert "provided_map" in prompt
+    assert "item_deletion_preauthorized" in prompt
+    assert "researcher-owned safety decision" in prompt
+
+
+def test_model_paths_edge_list_reproduces_the_model_halt() -> None:  # directive (3)
+    # The exact second live incident: a from/to edge list under `model` trips the
+    # schema's additionalProperties:false at $.model (only best-match of the 255).
+    def add_paths(data: dict[str, Any]) -> None:
+        data["model"]["paths"] = [{"from": "ENB", "to": "PU"}, {"from": "PU", "to": "ATT"}]
+
+    node = _node({"model-paths": _mutated_yaml(add_paths)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("model-paths"), min_designed_items=3)
+    assert excinfo.value.to_report()["details"]["path"] == "$.model"
+
+
+def _set_nested(data: dict[str, Any], keys: list[Any], value: Any) -> None:
+    target: Any = data
+    for key in keys[:-1]:
+        target = target[key]
+    target[keys[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("keys", "value", "path"),
+    [
+        (["constructs", 0, "parent"], "ENB", "$.constructs[0]"),
+        (["hypotheses", 0, "direction"], "up", "$.hypotheses[0]"),
+        (["instrument", "items", 0, "construct"], "RES", "$.instrument.items[0]"),
+        (["methodology", "approach"], "pls", "$.methodology"),
+        (["data", "target_population"], "SMEs", "$.data"),
+        (["higher_order"], [{"name": "ENB"}], "$.higher_order"),
+        (["meta", "study_id"], "dba_validation_qatar_ai", "$.meta.study_id"),
+    ],
+)
+def test_underspecified_block_drift_halts_at_its_path(
+    keys: list[Any], value: Any, path: str
+) -> None:
+    # One observed drift per previously under-specified block: the engine rejects each
+    # at its exact JSON path, so no single-block halt is left latent behind model.paths.
+    node = _node({path: _mutated_yaml(lambda data: _set_nested(data, keys, value))})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document(path), min_designed_items=3)
+    assert excinfo.value.to_report()["details"]["path"] == path
+
+
+# -- §7 combined follow-up: engine-injected authoritative provenance/governance --------
+# The prompt tells Node A to OMIT meta.source_documents (file hashes) and
+# methodology.playbook_id/version (governance) — an LLM cannot derive them and must not
+# fabricate a hash. The engine injects the authoritative values into the raw contract
+# BEFORE schema validation, so a compliant Node A response completes into a schema-valid
+# StudyConfig. These tests pin the injection API and the no-injection halt.
+
+
+def _drop_engine_fields(data: dict[str, Any]) -> None:
+    del data["meta"]["source_documents"]
+    del data["methodology"]["playbook_id"]
+    del data["methodology"]["playbook_version"]
+
+
+def test_extract_injects_authoritative_provenance_before_validation() -> None:
+    # A response omitting the engine fields WOULD fail schema; with provenance it becomes
+    # valid — proving the injection lands before validate_and_build.
+    from burhan.contract.node_a import ContractProvenance, SourceDocumentRef
+
+    prov = ContractProvenance(
+        source_documents=(
+            SourceDocumentRef("study_document", "inputs/study_document.docx", "a" * 64),
+            SourceDocumentRef("data_dictionary", "inputs/data_dictionary.docx", "b" * 64),
+        ),
+        playbook_id="CB_SEM_PLAYBOOK",
+        playbook_version="1.0",
+    )
+    node = _node({"inject": _mutated_yaml(_drop_engine_fields)})
+    config = node.extract(study_document=_document("inject"), min_designed_items=3, provenance=prov)
+    assert [(s.role, s.path, s.sha256) for s in config.meta.source_documents] == [
+        ("study_document", "inputs/study_document.docx", "a" * 64),
+        ("data_dictionary", "inputs/data_dictionary.docx", "b" * 64),
+    ]
+    assert config.methodology.playbook_id == "CB_SEM_PLAYBOOK"
+    assert config.methodology.playbook_version == "1.0"
+
+
+def test_extract_provenance_overwrites_any_llm_supplied_fields() -> None:
+    # If the model defies the prompt and emits these anyway, the engine's authoritative
+    # values win — a model-emitted file hash is never trusted.
+    from burhan.contract.node_a import ContractProvenance, SourceDocumentRef
+
+    def fake_provenance(data: dict[str, Any]) -> None:
+        data["meta"]["source_documents"] = [
+            {"role": "study_document", "path": "x", "sha256": "c" * 64}
+        ]
+        data["methodology"]["playbook_id"] = "FAKE_PLAYBOOK"
+
+    prov = ContractProvenance(
+        source_documents=(
+            SourceDocumentRef("study_document", "inputs/study_document.docx", "a" * 64),
+        ),
+        playbook_id="CB_SEM_PLAYBOOK",
+        playbook_version="1.0",
+    )
+    node = _node({"overwrite": _mutated_yaml(fake_provenance)})
+    config = node.extract(
+        study_document=_document("overwrite"), min_designed_items=3, provenance=prov
+    )
+    assert config.meta.source_documents[0].sha256 == "a" * 64  # authoritative, not the LLM's "c…"
+    assert config.methodology.playbook_id == "CB_SEM_PLAYBOOK"  # not "FAKE_PLAYBOOK"
+
+
+def test_omitted_provenance_without_injection_halts_typed() -> None:
+    # Negative: the corrected prompt omits engine fields; WITHOUT the injection path the
+    # omission is a typed halt on a required field, never a silent pass.
+    node = _node({"omit": _mutated_yaml(_drop_engine_fields)})
+    with pytest.raises(IntegrityHalt) as excinfo:
+        node.extract(study_document=_document("omit"), min_designed_items=3)  # no provenance
+    details = str(excinfo.value.to_report()["details"])
+    assert "source_documents" in details or "playbook" in details
