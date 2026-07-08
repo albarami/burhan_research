@@ -140,13 +140,18 @@ def _has_qualtrics_signature(rows: list[list[str]]) -> bool:
 
 def _resolve_header_rows(config: StudyConfig, rows: list[list[str]], export_path: Path) -> int:
     """Establish the header-row count without ever silently assuming one for a
-    multi-header export (FR-104; TC-18). The contract is authoritative; when it is
-    silent a recognized dialect resolves it; otherwise the run halts rather than
-    mis-reading a multi-header export as single-header."""
+    multi-header export (FR-104; TC-18, PLAN v1 §2). Precedence: (1) the contract's
+    declared count wins; (2) else a recognized dialect — export_dialect == "qualtrics"
+    or the row-3 ImportId signature — resolves it to three; (3) else an unambiguous
+    single-header frame (row 0 already carries every modeled item code) resolves to one,
+    preserving generic-CSV behavior; (4) else the run halts rather than mis-reading a
+    multi-header export as single-header."""
     if config.data.header_rows is not None:
         return config.data.header_rows
     if config.data.export_dialect == "qualtrics" or _has_qualtrics_signature(rows):
         return 3
+    if _is_unambiguous_single_header(config, rows):
+        return 1
     halt(
         IntegrityHalt(
             "cannot establish the export header structure: declare data.header_rows "
@@ -159,6 +164,17 @@ def _resolve_header_rows(config: StudyConfig, rows: list[list[str]], export_path
             },
         )
     )
+
+
+def _is_unambiguous_single_header(config: StudyConfig, rows: list[list[str]]) -> bool:
+    """A frame is consistent with a single header row when row 0 already carries every
+    declared modeled item code — as a literal column name or a whole-token embedding —
+    so reading it as one header loses no codes (PLAN v1 §2 step 3). A multi-header export
+    hides its item codes in row 1, so its row 0 resolves none of them: that stays
+    ambiguous and halts. Detection anchors on the modeled items only; role columns are
+    resolved (and any ambiguity caught) downstream once the header count is fixed."""
+    row0 = rows[0] if rows else []
+    return all(_resolve_column(item.code, row0, row0) for item in config.instrument.items)
 
 
 def _load_raw(export_path: Path, declared_format: str) -> list[list[str]]:

@@ -292,6 +292,24 @@ def test_single_header_plain_csv_resolves() -> None:  # AT-M18-5
     assert crosswalk.n_data_rows == 3
 
 
+def test_single_header_plain_csv_resolves_with_header_rows_omitted() -> None:  # AT-M18-5 regression
+    # PLAN v1 §2 step 3: a plain single-header CSV with BOTH header_rows and export_dialect
+    # unset must resolve as one header (row 0 already carries the item codes) — never halt.
+    # The masked regression: AT-M18-5's fixture set header_rows: 1 explicitly, so the
+    # omitted-header generic path went untested and wrongly halted.
+    def omit_header_rows(data: dict[str, Any]) -> None:
+        del data["data"]["header_rows"]
+
+    crosswalk = build_crosswalk(
+        EXPORTS / "plain_single_header.csv", single_header_config(omit_header_rows)
+    )
+    assert crosswalk.header_rows == 1
+    assert crosswalk.column_to_item == {"SR1": "SR1", "SR2": "SR2", "SR3": "SR3", "SR4": "SR4"}
+    assert crosswalk.roles["respondent"] == "id"
+    assert crosswalk.roles["age"] == "demographic"
+    assert crosswalk.n_data_rows == 3
+
+
 # -- TC-18 negative controls: secondary-fix ambiguity + detector robustness ----------
 #
 # The secondary fix resolves a non-modeled role token by literal row-0 name OR by
