@@ -23,6 +23,7 @@ exists). Reports name columns and codes — never respondent values
 from __future__ import annotations
 
 import csv
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,9 +69,9 @@ class Crosswalk:
 def build_crosswalk(export_path: Path, config: StudyConfig) -> Crosswalk:
     """Load the export, hash it, and resolve the full column accounting."""
     declared_format = str(config.data.format)
-    header_rows = config.data.header_rows if config.data.header_rows is not None else 1
     rows = _load_raw(export_path, declared_format)
     raw_frame_sha256 = sha256_canonical(rows)  # immediately after load (FR-101)
+    header_rows = _resolve_header_rows(config, rows, export_path)
 
     if len(rows) < header_rows:
         halt(
@@ -110,7 +111,7 @@ def build_crosswalk(export_path: Path, config: StudyConfig) -> Crosswalk:
         )
 
     column_to_item = _match_items(codes, texts, config, export_path)
-    roles = _account_roles(codes, column_to_item, config, export_path)
+    roles = _account_roles(codes, column_to_item, config, texts, export_path)
 
     return Crosswalk(
         source_file=export_path.name,
@@ -119,6 +120,44 @@ def build_crosswalk(export_path: Path, config: StudyConfig) -> Crosswalk:
         raw_frame_sha256=raw_frame_sha256,
         column_to_item=column_to_item,
         roles=roles,
+    )
+
+
+def _has_qualtrics_signature(rows: list[list[str]]) -> bool:
+    """The Qualtrics multi-header dialect marks its third header row (index 2)
+    with per-column ImportId metadata JSON — a deterministic 3-header signature."""
+    if len(rows) < 3 or not rows[2]:
+        return False
+    for cell in rows[2]:
+        try:
+            obj = json.loads(cell)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if not (isinstance(obj, dict) and "ImportId" in obj):
+            return False
+    return True
+
+
+def _resolve_header_rows(config: StudyConfig, rows: list[list[str]], export_path: Path) -> int:
+    """Establish the header-row count without ever silently assuming one for a
+    multi-header export (FR-104; TC-18). The contract is authoritative; when it is
+    silent a recognized dialect resolves it; otherwise the run halts rather than
+    mis-reading a multi-header export as single-header."""
+    if config.data.header_rows is not None:
+        return config.data.header_rows
+    if config.data.export_dialect == "qualtrics" or _has_qualtrics_signature(rows):
+        return 3
+    halt(
+        IntegrityHalt(
+            "cannot establish the export header structure: declare data.header_rows "
+            "or a recognized export_dialect — a multi-header export must not be read "
+            "as single-header by default (FR-104)",
+            report={
+                "file": export_path.name,
+                "header_rows": None,
+                "export_dialect": config.data.export_dialect,
+            },
+        )
     )
 
 
@@ -171,6 +210,23 @@ def _load_raw(export_path: Path, declared_format: str) -> list[list[str]]:
     return rows
 
 
+def _embeds(token: str, text: str) -> bool:
+    """Whole-token match of a declared code inside export header text (FR-103)."""
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", text) is not None
+
+
+def _resolve_column(token: str, codes: list[str], texts: list[str]) -> list[str]:
+    """Every export column a declared token resolves to — by literal row-0 identity
+    (the column name IS the token) or by whole-token embedding in the code-bearing
+    header row. Non-modeled roles may be declared either way; a token resolving to
+    more than one column is ambiguous (the caller halts)."""
+    hits: list[str] = []
+    for column, text in zip(codes, texts, strict=True):
+        if column == token or _embeds(token, text):
+            hits.append(column)
+    return hits
+
+
 def _match_items(
     codes: list[str], texts: list[str], config: StudyConfig, export_path: Path
 ) -> dict[str, str]:
@@ -180,8 +236,7 @@ def _match_items(
     column_to_items: dict[str, list[str]] = {}
     for column, text in zip(codes, texts, strict=True):
         for code in item_codes:
-            token = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])")
-            if token.search(text):
+            if _embeds(code, text):
                 item_to_columns[code].append(column)
                 column_to_items.setdefault(column, []).append(code)
 
@@ -218,19 +273,16 @@ def _account_roles(
     codes: list[str],
     column_to_item: dict[str, str],
     config: StudyConfig,
+    texts: list[str],
     export_path: Path,
 ) -> dict[str, str]:
-    """Assign exactly one role to every export column (V6; FR-507)."""
+    """Assign exactly one role to every export column (V6; FR-507). Declared
+    non-modeled columns resolve like item codes — by literal row-0 name OR embedded
+    header code — so a multi-header export need not name them as literal row-0
+    identifiers (TC-18). Ambiguity and orphans remain hard failures."""
     roles: dict[str, str] = {}
 
-    def assign(column: str, role: str) -> None:
-        if column not in codes:
-            halt(
-                IntegrityHalt(
-                    "contract declares a column the export lacks (FR-104)",
-                    report={"file": export_path.name, "column": column, "role": role},
-                )
-            )
+    def claim(column: str, role: str) -> None:
         if column in roles:
             halt(
                 IntegrityHalt(
@@ -244,26 +296,49 @@ def _account_roles(
             )
         roles[column] = role
 
-    for column in column_to_item:
-        assign(column, ROLE_MODEL_ITEM)
+    def resolve(token: str, role: str) -> None:
+        columns = _resolve_column(token, codes, texts)
+        if not columns:
+            halt(
+                IntegrityHalt(
+                    "contract declares a column the export lacks (FR-104)",
+                    report={"file": export_path.name, "column": token, "role": role},
+                )
+            )
+        if len(columns) > 1:
+            halt(
+                IntegrityHalt(
+                    "declared column resolves to more than one export column (FR-103/104)",
+                    report={
+                        "file": export_path.name,
+                        "column": token,
+                        "role": role,
+                        "columns": sorted(columns),
+                    },
+                )
+            )
+        claim(columns[0], role)
+
+    for column in column_to_item:  # already resolved to row-0 identifiers
+        claim(column, ROLE_MODEL_ITEM)
     data = config.data
     if data.id_column is not None:
-        assign(data.id_column, ROLE_ID)
+        resolve(data.id_column, ROLE_ID)
     if data.consent_column is not None:
-        assign(data.consent_column, ROLE_CONSENT)
+        resolve(data.consent_column, ROLE_CONSENT)
     if data.completion is not None:
         if data.completion.progress_column is not None:
-            assign(data.completion.progress_column, ROLE_COMPLETION)
+            resolve(data.completion.progress_column, ROLE_COMPLETION)
         if data.completion.finished_column is not None:
-            assign(data.completion.finished_column, ROLE_COMPLETION)
+            resolve(data.completion.finished_column, ROLE_COMPLETION)
     for check in data.attention_checks or []:
-        assign(check.column, ROLE_ATTENTION)
+        resolve(check.column, ROLE_ATTENTION)
     for demographic in data.demographics or []:
-        assign(demographic.column_hint, ROLE_DEMOGRAPHIC)
+        resolve(demographic.column_hint, ROLE_DEMOGRAPHIC)
     for column in data.metadata_columns or []:
-        assign(column, ROLE_METADATA)
+        resolve(column, ROLE_METADATA)
     for column in data.ignored_item_columns or []:
-        assign(column, ROLE_IGNORED)
+        resolve(column, ROLE_IGNORED)
 
     orphans = sorted(set(codes) - set(roles))
     if orphans:

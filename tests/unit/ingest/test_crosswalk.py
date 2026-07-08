@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ingest_util import EXPORTS, fixture_config
+from ingest_util import EXPORTS, dba_fixture_config, fixture_config, single_header_config
 
 from burhan.contract.crosswalk import Crosswalk, build_crosswalk
 from burhan.core.errors import IntegrityHalt
@@ -217,3 +217,120 @@ def test_too_few_rows_for_declared_headers_halts(tmp_path: Path) -> None:
     with pytest.raises(IntegrityHalt) as excinfo:
         build_crosswalk(stub, fixture_config())
     assert "header" in excinfo.value.message
+
+
+# -- TC-18: real 3-header Qualtrics export (header_rows undeclared) ------------------
+#
+# The DBA case: a 3-header Qualtrics export whose contract declares NEITHER
+# header_rows NOR export_dialect, and whose non-modeled roles are declared by
+# their embedded code (demographics `D1`, ignored `IGN1`) rather than the literal
+# row-0 QID. The adoption fixture set header_rows=3 and used literal row-0 names,
+# so it never exercised either mode.
+
+
+def test_multiheader_modeled_items_resolve_without_header_rows() -> None:  # AT-M18-1
+    crosswalk = build_crosswalk(EXPORTS / "dba_multiheader.csv", dba_fixture_config())
+    assert crosswalk.header_rows == 3  # dialect auto-detected (row-2 ImportId signature)
+    assert crosswalk.column_to_item == {
+        "Q1_1": "RS1",
+        "Q1_2": "RS2",
+        "Q2_1": "CU1",
+        "Q2_2": "CU2",
+    }
+    assert crosswalk.n_data_rows == 3
+
+
+def test_multiheader_embedded_role_codes_resolve() -> None:  # AT-M18-2
+    crosswalk = build_crosswalk(EXPORTS / "dba_multiheader.csv", dba_fixture_config())
+    # embedded-code roles resolve to their row-0 columns…
+    assert crosswalk.roles["Q40"] == "demographic"  # embedded `D1`
+    assert crosswalk.roles["Q99"] == "ignored_item"  # embedded `IGN1`
+    # …alongside literal row-0 roles, with no "declared column the export lacks" halt.
+    assert crosswalk.roles["ResponseId"] == "id"
+    assert crosswalk.roles["StartDate"] == "metadata"
+    assert set(crosswalk.roles) == {
+        "ResponseId",
+        "Q1_1",
+        "Q1_2",
+        "Q2_1",
+        "Q2_2",
+        "Q40",
+        "Q99",
+        "StartDate",
+    }
+
+
+def test_multiheader_undeclared_column_still_orphans() -> None:  # AT-M18-3
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(EXPORTS / "dba_multiheader_orphan.csv", dba_fixture_config())
+    assert "SneakyExtra" in str(excinfo.value.to_report()["details"])
+
+    def declare_metadata(data: dict[str, Any]) -> None:
+        data["data"]["metadata_columns"].append("SneakyExtra")
+
+    crosswalk = build_crosswalk(
+        EXPORTS / "dba_multiheader_orphan.csv", dba_fixture_config(declare_metadata)
+    )
+    assert crosswalk.roles["SneakyExtra"] == "metadata"
+
+
+def test_multiheader_unstated_ambiguous_headers_halt() -> None:  # AT-M18-4
+    # Multi-header shape, no ImportId signature, header_rows/export_dialect unset:
+    # must halt typed — never silently parse as a single-header (the original bug).
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(EXPORTS / "dba_multiheader_nosignature.csv", dba_fixture_config())
+    assert "header" in excinfo.value.message
+    assert "structure" in excinfo.value.message
+
+
+def test_single_header_plain_csv_resolves() -> None:  # AT-M18-5
+    crosswalk = build_crosswalk(EXPORTS / "plain_single_header.csv", single_header_config())
+    assert crosswalk.header_rows == 1
+    assert crosswalk.column_to_item == {"SR1": "SR1", "SR2": "SR2", "SR3": "SR3", "SR4": "SR4"}
+    assert crosswalk.roles["respondent"] == "id"
+    assert crosswalk.roles["age"] == "demographic"
+    assert crosswalk.n_data_rows == 3
+
+
+# -- TC-18 negative controls: secondary-fix ambiguity + detector robustness ----------
+#
+# The secondary fix resolves a non-modeled role token by literal row-0 name OR by
+# embedding in the code-bearing header row; its failure mode — a token that embeds in
+# MORE THAN ONE column — must halt naming the columns, never silently take the first
+# (FR-103/104). The primary fix's dialect auto-detector must likewise DECLINE a
+# degenerate or non-Qualtrics header block rather than crash or false-positive into a
+# 3-header read. AT-M18-4 covers the detector's third rejection route (row-3 is data
+# that fails to parse as JSON); these two cover the short-circuit and JSON-non-ImportId
+# routes, so every non-signature path is exercised.
+
+
+def test_multiheader_embedded_role_token_ambiguous_halts_naming_columns() -> None:  # secondary fix
+    # `D1` (declared demographic) is embedded in TWO row-1 cells (Q40 and Q99): the
+    # resolver must halt naming both, never silently claim the first (FR-103/104).
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(EXPORTS / "dba_multiheader_ambiguous_role.csv", dba_fixture_config())
+    assert "more than one" in excinfo.value.message
+    details = excinfo.value.to_report()["details"]
+    assert details["column"] == "D1"
+    assert details["role"] == "demographic"
+    assert details["columns"] == ["Q40", "Q99"]
+
+
+def test_detector_declines_degenerate_short_export(tmp_path: Path) -> None:
+    # Fewer than three rows, no dialect/header_rows declared: the signature check must
+    # short-circuit (no IndexError on the absent third row) and the run halts typed.
+    stub = tmp_path / "tiny_nodialect.csv"
+    stub.write_text("ResponseId,Q1_1\nResponse ID,RS1 marker.\n", encoding="utf-8")
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(stub, dba_fixture_config())
+    assert "header" in excinfo.value.message and "structure" in excinfo.value.message
+
+
+def test_detector_declines_json_non_importid_third_row(tmp_path: Path) -> None:
+    # Row 3 parses as JSON but is not Qualtrics ImportId metadata (bare numbers): the
+    # detector must not false-positive into a 3-header read — it halts for a declaration.
+    stub = tmp_path / "numeric_row3.csv"
+    stub.write_text("ResponseId,Q1_1\nResponse ID,RS1 marker.\n1,2\n", encoding="utf-8")
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(stub, dba_fixture_config())
+    assert "header" in excinfo.value.message and "structure" in excinfo.value.message

@@ -106,3 +106,145 @@ def fixture_config(mutate: Any = None) -> StudyConfig:
     if mutate is not None:
         mutate(data)
     return validate_and_build(StudyConfig, data)
+
+
+def _likert(code: str, text: str, construct: str) -> dict[str, Any]:
+    return {
+        "code": code,
+        "text": text,
+        "construct_ref": construct,
+        "scale": {"type": "likert", "min": 1, "max": 7},
+        "reverse_coded": False,
+    }
+
+
+# Mirrors the real DBA contract's convention (TC-18): a 3-header Qualtrics export
+# where NEITHER header_rows NOR export_dialect is declared (the crosswalk must
+# detect the dialect), and the non-modeled roles are declared by their EMBEDDED
+# code (demographics `D1`, ignored `IGN1`) rather than the literal row-0 QID —
+# the mode the adoption fixture (literal row-0 names) never exercised.
+_DBA_CONFIG: dict[str, Any] = {
+    "schema_version": 1,
+    "meta": {
+        "study_id": "dba-multiheader-fixture",
+        "title": "DBA multi-header ingest fixture",
+        "source_documents": [
+            {"role": "study_document", "path": "inputs/study.docx", "sha256": _SHA}
+        ],
+    },
+    "methodology": {
+        "declared": "CB_SEM",
+        "playbook_id": "CB_SEM_PLAYBOOK",
+        "playbook_version": "1.0",
+        "design": "cross_sectional",
+    },
+    "instrument": {
+        "items": [
+            _likert("RS1", "We have budget.", "RES"),
+            _likert("RS2", "Funding is secured.", "RES"),
+            _likert("CU1", "We reward experimentation.", "CUL"),
+            _likert("CU2", "New tools welcomed.", "CUL"),
+        ]
+    },
+    "constructs": [
+        {
+            "code": "RES",
+            "name": "Resources",
+            "level": "first_order",
+            "measurement": "reflective",
+            "indicators": ["RS1", "RS2"],
+        },
+        {
+            "code": "CUL",
+            "name": "Culture",
+            "level": "first_order",
+            "measurement": "reflective",
+            "indicators": ["CU1", "CU2"],
+        },
+    ],
+    "model": {"exogenous": ["RES"], "endogenous": ["CUL"]},
+    "hypotheses": [
+        {"id": "H1", "effect": "direct", "from": "RES", "to": "CUL", "sign": "positive"}
+    ],
+    "data": {
+        "file": "inputs/dba_multiheader.csv",
+        "format": "csv",
+        # NOTE: no export_dialect, no header_rows — the DBA-real omission the crosswalk resolves.
+        "id_column": "ResponseId",  # literal row-0 identifier
+        "demographics": [{"code": "firm_size", "column_hint": "D1", "type": "ordinal"}],  # embedded
+        "ignored_item_columns": ["IGN1"],  # embedded
+        "metadata_columns": ["StartDate"],  # literal row-0 identifier
+    },
+}
+
+
+def dba_fixture_config(mutate: Any = None) -> StudyConfig:
+    """DBA-style contract matching `dba_multiheader.csv` (embedded-code roles,
+    no declared header_rows/export_dialect)."""
+    data = copy.deepcopy(_DBA_CONFIG)
+    if mutate is not None:
+        mutate(data)
+    return validate_and_build(StudyConfig, data)
+
+
+# A plain single-header CSV (item codes as literal row-0 headers) — the
+# non-Qualtrics case that must keep resolving (TC-18 AT-M18-5, no regression).
+_SINGLE_HEADER_CONFIG: dict[str, Any] = {
+    "schema_version": 1,
+    "meta": {
+        "study_id": "single-header-fixture",
+        "title": "Single-header ingest fixture",
+        "source_documents": [
+            {"role": "study_document", "path": "inputs/study.docx", "sha256": _SHA}
+        ],
+    },
+    "methodology": {
+        "declared": "CB_SEM",
+        "playbook_id": "CB_SEM_PLAYBOOK",
+        "playbook_version": "1.0",
+        "design": "cross_sectional",
+    },
+    "instrument": {
+        "items": [
+            _likert("SR1", "Resources item one.", "RES"),
+            _likert("SR2", "Resources item two.", "RES"),
+            _likert("SR3", "Culture item one.", "CUL"),
+            _likert("SR4", "Culture item two.", "CUL"),
+        ]
+    },
+    "constructs": [
+        {
+            "code": "RES",
+            "name": "Resources",
+            "level": "first_order",
+            "measurement": "reflective",
+            "indicators": ["SR1", "SR2"],
+        },
+        {
+            "code": "CUL",
+            "name": "Culture",
+            "level": "first_order",
+            "measurement": "reflective",
+            "indicators": ["SR3", "SR4"],
+        },
+    ],
+    "model": {"exogenous": ["RES"], "endogenous": ["CUL"]},
+    "hypotheses": [
+        {"id": "H1", "effect": "direct", "from": "RES", "to": "CUL", "sign": "positive"}
+    ],
+    "data": {
+        "file": "inputs/plain_single_header.csv",
+        "format": "csv",
+        "header_rows": 1,  # explicit single header
+        "id_column": "respondent",
+        "demographics": [{"code": "age", "column_hint": "age", "type": "numeric"}],
+    },
+}
+
+
+def single_header_config(mutate: Any = None) -> StudyConfig:
+    """Contract matching `plain_single_header.csv` (codes as literal row-0 headers)."""
+    data = copy.deepcopy(_SINGLE_HEADER_CONFIG)
+    if mutate is not None:
+        mutate(data)
+    return validate_and_build(StudyConfig, data)
