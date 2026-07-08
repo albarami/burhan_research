@@ -46,7 +46,9 @@ class RWorker:
         timeout_seconds: int = 600,
     ) -> None:
         self._rscript = rscript
-        self._workers_dir = workers_dir if workers_dir is not None else _default_workers_dir()
+        self._workers_dir = (
+            workers_dir if workers_dir is not None else _default_workers_dir()
+        ).resolve()
         self._timeout = timeout_seconds
 
     def call(
@@ -105,7 +107,12 @@ class RWorker:
         ]
         try:
             completed = subprocess.run(  # noqa: S603 — argv fixed above; no shell
-                argv, capture_output=True, text=True, timeout=self._timeout, check=False
+                argv,
+                cwd=self._workers_dir,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+                check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._halt(
