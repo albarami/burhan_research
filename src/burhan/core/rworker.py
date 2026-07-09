@@ -46,7 +46,9 @@ class RWorker:
         timeout_seconds: int = 600,
     ) -> None:
         self._rscript = rscript
-        self._workers_dir = workers_dir if workers_dir is not None else _default_workers_dir()
+        self._workers_dir = (
+            workers_dir if workers_dir is not None else _default_workers_dir()
+        ).resolve()
         self._timeout = timeout_seconds
 
     def call(
@@ -67,6 +69,9 @@ class RWorker:
             run_dir: Run directory owning the ``stats/`` call files.
             seed: Derived seed the worker must set before computing.
         """
+        # Absolute run_dir so the input/output argv paths stay valid when the R
+        # subprocess runs with cwd=self._workers_dir (TC-19 path safety).
+        run_dir = run_dir.resolve()
         worker_path = self._workers_dir / f"{module}.R"
         calls_dir = run_dir / CALLS_SUBDIR
         calls_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +110,12 @@ class RWorker:
         ]
         try:
             completed = subprocess.run(  # noqa: S603 — argv fixed above; no shell
-                argv, capture_output=True, text=True, timeout=self._timeout, check=False
+                argv,
+                cwd=self._workers_dir,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+                check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._halt(
