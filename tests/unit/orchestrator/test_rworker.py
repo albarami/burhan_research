@@ -234,7 +234,10 @@ def test_false_renv_drift_reproduces_without_project_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # AT-M19-2
     """Invoking harness.R as the pre-fix worker did — no project cwd, project library
-    off the ambient path — reproduces the false RENV_DRIFT (exit 3)."""
+    off the ambient path — halts. Where renv is reachable off the project library (as
+    in the live DBA run) the exact symptom is the false RENV_DRIFT (exit 3); where renv
+    lives ONLY in the project library (e.g. CI), isolating it removes renv too, so the
+    harness cannot load renv at all. The cwd=workers/r fix resolves both."""
     empty_lib = tmp_path / "empty_userlib"
     empty_lib.mkdir()
     _isolate_from_conftest_r_libs(monkeypatch, empty_lib)
@@ -252,8 +255,12 @@ def test_false_renv_drift_reproduces_without_project_cwd(
     completed = subprocess.run(  # noqa: S603
         argv, cwd=tmp_path, capture_output=True, text=True, check=False
     )
-    assert completed.returncode == 3
-    assert "RENV_DRIFT" in completed.stderr
+    # The un-activated invocation must halt. Where renv is reachable off the project
+    # library it is the exact false RENV_DRIFT (exit 3); where renv lives only in the
+    # project library (CI), isolating it makes renv itself unavailable — still a halt.
+    assert completed.returncode != 0
+    if "RENV_DRIFT" in completed.stderr:
+        assert completed.returncode == 3
 
 
 def test_workers_dir_absolute_for_default() -> None:  # AT-M19-4
