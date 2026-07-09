@@ -211,6 +211,24 @@ def _isolate_from_conftest_r_libs(monkeypatch: pytest.MonkeyPatch, empty_lib: Pa
     monkeypatch.setenv("R_LIBS_USER", str(empty_lib))
 
 
+def _renv_only_library(tmp_path: Path) -> Path:
+    """A library dir exposing ONLY renv, symlinked from wherever it is installed (the
+    project library on CI, a site library locally). Pointed to by R_LIBS it lets
+    renv::status load and run while the workers/r project packages stay off the library
+    path — the deterministic precondition for the false not-synchronized drift. No
+    install/restore/snapshot; workers/r is untouched."""
+    renv_pkg = subprocess.run(  # noqa: S603
+        ["Rscript", "-e", 'cat(find.package("renv"))'],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    lib = tmp_path / "renv_only_lib"
+    lib.mkdir()
+    (lib / "renv").symlink_to(renv_pkg, target_is_directory=True)
+    return lib
+
+
 @pytest.mark.skipif(shutil.which("Rscript") is None, reason="R not installed (E-R1)")
 def test_renv_drift_clears_with_project_cwd(
     run_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -233,14 +251,15 @@ def test_renv_drift_clears_with_project_cwd(
 def test_false_renv_drift_reproduces_without_project_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # AT-M19-2
-    """Invoking harness.R as the pre-fix worker did — no project cwd, project library
-    off the ambient path — halts. Where renv is reachable off the project library (as
-    in the live DBA run) the exact symptom is the false RENV_DRIFT (exit 3); where renv
-    lives ONLY in the project library (e.g. CI), isolating it removes renv too, so the
-    harness cannot load renv at all. The cwd=workers/r fix resolves both."""
+    """Invoking harness.R as the pre-fix worker did — no project cwd, renv itself
+    loadable but the workers/r project library NOT activated — makes renv::status run
+    and correctly report the false not-synchronized drift: RENV_DRIFT, exit 3. The
+    cwd=workers/r fix activates the project and clears it."""
+    renv_lib = _renv_only_library(tmp_path)
     empty_lib = tmp_path / "empty_userlib"
     empty_lib.mkdir()
-    _isolate_from_conftest_r_libs(monkeypatch, empty_lib)
+    monkeypatch.setenv("R_LIBS", str(renv_lib))
+    monkeypatch.setenv("R_LIBS_USER", str(empty_lib))
     envelope = {"call_id": "d1", "module": "echo_worker", "seed": 1, "payload": {}}
     in_path = tmp_path / "in.json"
     out_path = tmp_path / "out.json"
@@ -255,12 +274,8 @@ def test_false_renv_drift_reproduces_without_project_cwd(
     completed = subprocess.run(  # noqa: S603
         argv, cwd=tmp_path, capture_output=True, text=True, check=False
     )
-    # The un-activated invocation must halt. Where renv is reachable off the project
-    # library it is the exact false RENV_DRIFT (exit 3); where renv lives only in the
-    # project library (CI), isolating it makes renv itself unavailable — still a halt.
-    assert completed.returncode != 0
-    if "RENV_DRIFT" in completed.stderr:
-        assert completed.returncode == 3
+    assert completed.returncode == 3
+    assert "RENV_DRIFT" in completed.stderr
 
 
 def test_workers_dir_absolute_for_default() -> None:  # AT-M19-4
