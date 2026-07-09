@@ -310,3 +310,75 @@ def test_real_r_call_leaves_renv_lock_unchanged(run_dir: Path) -> None:  # AT-M1
     real.call("echo_worker", {"greeting": "x"}, call_id="c501", run_dir=run_dir, seed=7)
     after = hashlib.sha256(lock.read_bytes()).hexdigest()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# TC-19 REJECT remediation — run_dir path safety. With cwd=workers/r, a caller
+# supplied RELATIVE run_dir must still produce ABSOLUTE input/output argv paths;
+# otherwise the R process resolves them under workers/r, not the caller cwd.
+# ---------------------------------------------------------------------------
+
+
+def test_relative_run_dir_yields_absolute_io_paths(
+    worker: RWorker, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # AT-M19-4
+    """A caller-supplied relative run_dir yields absolute input/output argv paths
+    that still point at the intended run directory, once cwd=workers/r is set."""
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured["cwd"] = kwargs.get("cwd")
+        envelope = json.loads(Path(argv[3]).read_text(encoding="utf-8"))
+        Path(argv[4]).write_text(
+            json.dumps({"call_id": envelope["call_id"], "status": "ok", "result": {}}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("burhan.core.rworker.subprocess.run", fake_run)
+    worker.call("echo_worker", {}, call_id="c301", run_dir=Path("relrun"), seed=1)
+
+    run_abs = (tmp_path / "relrun").resolve()
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    in_arg, out_arg = Path(argv[3]), Path(argv[4])
+    assert in_arg.is_absolute() and out_arg.is_absolute()
+    assert in_arg == run_abs / "stats" / "call_c301.input.json"
+    assert out_arg == run_abs / "stats" / "call_c301.output.json"
+    assert captured["cwd"] == worker._workers_dir
+
+
+def test_all_argv_paths_absolute_with_relative_workers_dir_and_run_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # AT-M19-4
+    """Both a relative workers_dir and a relative run_dir yield four absolute Rscript
+    path args (harness, worker, input, output), so cwd=workers/r cannot misresolve
+    any of them."""
+    (tmp_path / "wr").mkdir()
+    (tmp_path / "wr" / "harness.R").write_text("", encoding="utf-8")
+    (tmp_path / "wr" / "echo_worker.R").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured["cwd"] = kwargs.get("cwd")
+        envelope = json.loads(Path(argv[3]).read_text(encoding="utf-8"))
+        Path(argv[4]).write_text(
+            json.dumps({"call_id": envelope["call_id"], "status": "ok", "result": {}}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("burhan.core.rworker.subprocess.run", fake_run)
+    worker = RWorker(rscript="Rscript", workers_dir=Path("wr"))
+    worker.call("echo_worker", {}, call_id="c401", run_dir=Path("relrun"), seed=1)
+
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert all(Path(a).is_absolute() for a in argv[1:])
+    cwd = captured["cwd"]
+    assert isinstance(cwd, Path) and cwd.is_absolute()
+    assert cwd == (tmp_path / "wr").resolve()

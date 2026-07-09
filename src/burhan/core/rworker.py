@@ -69,6 +69,9 @@ class RWorker:
             run_dir: Run directory owning the ``stats/`` call files.
             seed: Derived seed the worker must set before computing.
         """
+        # Absolute run_dir so the input/output argv paths stay valid when the R
+        # subprocess runs with cwd=self._workers_dir (TC-19 path safety).
+        run_dir = run_dir.resolve()
         worker_path = self._workers_dir / f"{module}.R"
         calls_dir = run_dir / CALLS_SUBDIR
         calls_dir.mkdir(parents=True, exist_ok=True)
