@@ -1,0 +1,6 @@
+ResponseId,Q1_1,Q1_2,Q2_1,Q2_2,Q45,Q45_2_TEXT,StartDate
+Response ID,Resources - RS1. We have budget.,Resources - RS2. Funding is secured.,Culture - CU1. We reward experimentation.,Culture - CU2. New tools welcomed.,What is your nationality? - Selected Choice,What is your nationality? - Other (please specify) - Text,Start Date
+"{""ImportId"":""_recordId""}","{""ImportId"":""QID1_1""}","{""ImportId"":""QID1_2""}","{""ImportId"":""QID2_1""}","{""ImportId"":""QID2_2""}","{""ImportId"":""QID45""}","{""ImportId"":""QID45_2_TEXT""}","{""ImportId"":""startDate""}"
+R_001,5,4,6,5,1,,2026-06-01 09:00
+R_002,6,5,5,6,2,,2026-06-01 10:00
+R_003,4,4,7,5,1,,2026-06-01 11:00

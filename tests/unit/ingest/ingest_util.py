@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import csv
+import json
 from pathlib import Path
 from typing import Any
 
@@ -248,3 +250,35 @@ def single_header_config(mutate: Any = None) -> StudyConfig:
     if mutate is not None:
         mutate(data)
     return validate_and_build(StudyConfig, data)
+
+
+def dba_demographic_config(demographics: list[dict[str, Any]], mutate: Any = None) -> StudyConfig:
+    """A DBA-style contract for the TC-20 demographic-crosswalk fixtures: the four
+    embedded modeled items + literal id/metadata columns, the given ``demographics``,
+    and no ``ignored_item_columns`` (each fixture declares only its own columns)."""
+
+    def _apply(data: dict[str, Any]) -> None:
+        data["data"]["demographics"] = demographics
+        data["data"].pop("ignored_item_columns", None)
+        if mutate is not None:
+            mutate(data)
+
+    return dba_fixture_config(_apply)
+
+
+def write_synthetic_export(
+    path: Path, columns: list[tuple[str, str]], n_data_rows: int = 3
+) -> Path:
+    """Write a synthetic 3-header Qualtrics-style export (row 0 = QIDs, row 1 =
+    question text carrying embedded codes, row 2 = ImportId signature) plus
+    ``n_data_rows`` synthetic data rows. ``columns`` is a list of ``(qid, row1_text)``.
+    All values are synthetic — never respondent data (standards §7)."""
+    qids = [qid for qid, _ in columns]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(qids)
+        writer.writerow([text for _, text in columns])
+        writer.writerow([json.dumps({"ImportId": qid}) for qid in qids])
+        for row in range(n_data_rows):
+            writer.writerow([str(row + 1)] * len(qids))
+    return path
