@@ -243,6 +243,27 @@ def _resolve_column(token: str, codes: list[str], texts: list[str]) -> list[str]
     return hits
 
 
+_TEXT_SIDECAR_ID = re.compile(r"^(?P<base>.+)_\d+_TEXT$")
+_TEXT_MARKER = re.compile(r"-\s*Text\s*$")
+
+
+def _is_text_sidecar(column: str, text: str, base_pool: set[str]) -> bool:
+    """A Qualtrics "Other-specify" free-text companion: id ``{base}_<N>_TEXT`` whose
+    base is present in ``base_pool`` AND a row-1 ``- Text`` marker. Both signals are
+    required, so a lookalike id or a marker-only column is never collapsed (TC-20)."""
+    match = _TEXT_SIDECAR_ID.match(column)
+    return bool(match and match["base"] in base_pool and _TEXT_MARKER.search(text))
+
+
+def _text_sidecars_of(base: str, codes: list[str], texts: list[str]) -> list[str]:
+    """Every Qualtrics free-text companion of ``base`` (``{base}_<N>_TEXT`` + marker)."""
+    return [
+        column
+        for column, text in zip(codes, texts, strict=True)
+        if _is_text_sidecar(column, text, {base})
+    ]
+
+
 def _match_items(
     codes: list[str], texts: list[str], config: StudyConfig, export_path: Path
 ) -> dict[str, str]:
@@ -297,6 +318,7 @@ def _account_roles(
     header code — so a multi-header export need not name them as literal row-0
     identifiers (TC-18). Ambiguity and orphans remain hard failures."""
     roles: dict[str, str] = {}
+    column_text = dict(zip(codes, texts, strict=True))
 
     def claim(column: str, role: str) -> None:
         if column in roles:
@@ -335,6 +357,41 @@ def _account_roles(
             )
         claim(columns[0], role)
 
+    def resolve_demographic(token: str) -> None:
+        # A demographic may resolve to its Qualtrics selected-choice column AND that
+        # column's paired "…_N_TEXT" free-text sidecar (whose row-1 text embeds the
+        # same code). Bind the selected-choice column and account the sidecar(s) as
+        # ignored; any OTHER multiplicity stays a real FR-103/104 ambiguity (TC-20).
+        hits = _resolve_column(token, codes, texts)
+        hit_set = set(hits)
+        bases = [c for c in hits if not _is_text_sidecar(c, column_text[c], hit_set)]
+        if not bases:
+            halt(
+                IntegrityHalt(
+                    "contract declares a column the export lacks (FR-104)",
+                    report={
+                        "file": export_path.name,
+                        "column": token,
+                        "role": ROLE_DEMOGRAPHIC,
+                    },
+                )
+            )
+        if len(bases) > 1:
+            halt(
+                IntegrityHalt(
+                    "declared column resolves to more than one export column (FR-103/104)",
+                    report={
+                        "file": export_path.name,
+                        "column": token,
+                        "role": ROLE_DEMOGRAPHIC,
+                        "columns": sorted(bases),
+                    },
+                )
+            )
+        claim(bases[0], ROLE_DEMOGRAPHIC)
+        for sidecar in _text_sidecars_of(bases[0], codes, texts):
+            claim(sidecar, ROLE_IGNORED)
+
     for column in column_to_item:  # already resolved to row-0 identifiers
         claim(column, ROLE_MODEL_ITEM)
     data = config.data
@@ -350,7 +407,7 @@ def _account_roles(
     for check in data.attention_checks or []:
         resolve(check.column, ROLE_ATTENTION)
     for demographic in data.demographics or []:
-        resolve(demographic.column_hint, ROLE_DEMOGRAPHIC)
+        resolve_demographic(demographic.column_hint)
     for column in data.metadata_columns or []:
         resolve(column, ROLE_METADATA)
     for column in data.ignored_item_columns or []:

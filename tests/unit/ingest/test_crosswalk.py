@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ingest_util import EXPORTS, dba_fixture_config, fixture_config, single_header_config
+from ingest_util import (
+    EXPORTS,
+    dba_demographic_config,
+    dba_fixture_config,
+    fixture_config,
+    single_header_config,
+    write_synthetic_export,
+)
 
 from burhan.contract.crosswalk import Crosswalk, build_crosswalk
 from burhan.core.errors import IntegrityHalt
@@ -352,3 +359,172 @@ def test_detector_declines_json_non_importid_third_row(tmp_path: Path) -> None:
     with pytest.raises(IntegrityHalt) as excinfo:
         build_crosswalk(stub, dba_fixture_config())
     assert "header" in excinfo.value.message and "structure" in excinfo.value.message
+
+
+# -- TC-20: Qualtrics demographic selected-choice + text-sidecar resolution ----------
+#
+# A Qualtrics demographic with an "Other (please specify)" option produces TWO export
+# columns: the selected-choice column and a `..._N_TEXT` free-text sidecar whose row-1
+# text embeds the SAME demographic code. The crosswalk binds the demographic to the
+# selected-choice column and accounts the `_TEXT` sidecar as ignored — while any OTHER
+# multiplicity stays a real FR-103/104 ambiguity and every unpaired column still orphans.
+
+_SIDECAR_DEMO = [{"code": "D3", "column_hint": "D3", "type": "categorical"}]
+
+
+def test_demographic_choice_binds_and_text_sidecar_ignored() -> None:  # AT-M20-1 (RED-first)
+    # Pre-fix: `D3` → {Q44, Q44_5_TEXT} halts FR-103/104. Post-fix: bind + ignore.
+    crosswalk = build_crosswalk(
+        EXPORTS / "dba_demographic_sidecar.csv", dba_demographic_config(_SIDECAR_DEMO)
+    )
+    assert crosswalk.roles["Q44"] == "demographic"  # selected-choice binds
+    assert crosswalk.roles["Q44_5_TEXT"] == "ignored_item"  # "Other-specify" sidecar accounted
+    assert crosswalk.n_data_rows == 3
+
+
+def test_unlabelled_demographic_binds_via_literal_id() -> None:  # AT-M20-3 (RED-first)
+    # Nationality's row-1 text carries no code, so the hint is the literal row-0 id
+    # `Q45`. Pre-fix: `Q45_2_TEXT` is unaccounted → V6 orphan halt. Post-fix: accounted
+    # by base-pairing (the sidecar is never a hit of `Q45`).
+    demo = [{"code": "D4", "column_hint": "Q45", "type": "categorical"}]
+    crosswalk = build_crosswalk(
+        EXPORTS / "dba_demographic_unlabelled.csv", dba_demographic_config(demo)
+    )
+    assert crosswalk.roles["Q45"] == "demographic"
+    assert crosswalk.roles["Q45_2_TEXT"] == "ignored_item"
+
+
+def test_skipped_demographic_number_resolves_when_undeclared() -> None:  # AT-M20-4a (valid state)
+    # Corrected source: D10 does not exist (survey skips D9→D11) and is NOT declared;
+    # the export gap causes no halt. Passes pre & post fix.
+    demo = [
+        {"code": "D9", "column_hint": "D9", "type": "categorical"},
+        {"code": "D11", "column_hint": "D11", "type": "ordinal"},
+    ]
+    crosswalk = build_crosswalk(
+        EXPORTS / "dba_demographic_skipnum.csv", dba_demographic_config(demo)
+    )
+    assert crosswalk.roles["Q50"] == "demographic"
+    assert crosswalk.roles["Q51"] == "demographic"
+
+
+def test_still_declaring_absent_demographic_halts() -> None:  # AT-M20-4b (FR-104 guard)
+    # A still-declared phantom D10 (the export has none) MUST halt FR-104 — FR-104
+    # strictness is not weakened by TC-20.
+    demo = [
+        {"code": "D9", "column_hint": "D9", "type": "categorical"},
+        {"code": "D11", "column_hint": "D11", "type": "ordinal"},
+        {"code": "D10", "column_hint": "D10", "type": "ordinal"},
+    ]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(EXPORTS / "dba_demographic_skipnum.csv", dba_demographic_config(demo))
+    details = excinfo.value.to_report()["details"]
+    assert "the export lacks" in excinfo.value.message
+    assert details["column"] == "D10"
+    assert details["role"] == "demographic"
+
+
+def test_demographic_two_nonsidecar_matches_halt(tmp_path: Path) -> None:  # AT-M20-2 (guard)
+    # `D3` embeds in a choice column AND a `_TEXT` column whose base (`Q88`) is NOT a
+    # co-hit → the collapse must NOT fire; real two-column ambiguity halts.
+    path = write_synthetic_export(
+        tmp_path / "crosswired.csv",
+        [
+            ("ResponseId", "Response ID"),
+            ("Q1_1", "Resources - RS1. We have budget."),
+            ("Q1_2", "Resources - RS2. Funding is secured."),
+            ("Q2_1", "Culture - CU1. We reward experimentation."),
+            ("Q2_2", "Culture - CU2. New tools welcomed."),
+            ("Q30", "D3. What is your education level? - Selected Choice"),
+            ("Q88_1_TEXT", "D3. Stray free text from another item - Text"),
+            ("StartDate", "Start Date"),
+        ],
+    )
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(path, dba_demographic_config(_SIDECAR_DEMO))
+    details = excinfo.value.to_report()["details"]
+    assert "more than one" in excinfo.value.message
+    assert details["column"] == "D3"
+    assert details["columns"] == ["Q30", "Q88_1_TEXT"]
+
+
+def test_text_named_column_without_marker_is_not_a_sidecar(
+    tmp_path: Path,
+) -> None:  # AT-M20-2 (dual-signal)
+    # `Q44_9_TEXT` has the `_N_TEXT` id AND base `Q44` is a co-hit, but its row-1 text
+    # has no "- Text" marker → NOT a sidecar (both signals required) → real ambiguity.
+    path = write_synthetic_export(
+        tmp_path / "marker_absent.csv",
+        [
+            ("ResponseId", "Response ID"),
+            ("Q1_1", "Resources - RS1. We have budget."),
+            ("Q1_2", "Resources - RS2. Funding is secured."),
+            ("Q2_1", "Culture - CU1. We reward experimentation."),
+            ("Q2_2", "Culture - CU2. New tools welcomed."),
+            ("Q44", "D3. What is your education level? - Selected Choice"),
+            ("Q44_9_TEXT", "D3. What is your education level duplicated - Selected Choice"),
+            ("StartDate", "Start Date"),
+        ],
+    )
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(path, dba_demographic_config(_SIDECAR_DEMO))
+    details = excinfo.value.to_report()["details"]
+    assert "more than one" in excinfo.value.message
+    assert details["columns"] == ["Q44", "Q44_9_TEXT"]
+
+
+def test_unpaired_text_column_still_orphans(tmp_path: Path) -> None:  # AT-M20-5 (zero-orphan)
+    # A `_TEXT` column not paired to any declared demographic base is NOT blanket-
+    # ignored — it stays an orphan (V6). Declaring it ignored then passes.
+    columns = [
+        ("ResponseId", "Response ID"),
+        ("Q1_1", "Resources - RS1. We have budget."),
+        ("Q1_2", "Resources - RS2. Funding is secured."),
+        ("Q2_1", "Culture - CU1. We reward experimentation."),
+        ("Q2_2", "Culture - CU2. New tools welcomed."),
+        ("Q47", "D6. What is your monthly income in QAR? - Selected Choice"),
+        ("Q77_1_TEXT", "Stray free-text column from elsewhere - Text"),
+        ("StartDate", "Start Date"),
+    ]
+    path = write_synthetic_export(tmp_path / "orphan_text.csv", columns)
+    demo = [{"code": "D6", "column_hint": "D6", "type": "ordinal"}]
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(path, dba_demographic_config(demo))
+    assert "unaccounted" in excinfo.value.message
+    assert "Q77_1_TEXT" in str(excinfo.value.to_report()["details"])
+
+    crosswalk = build_crosswalk(
+        path,
+        dba_demographic_config(
+            demo, mutate=lambda d: d["data"].update({"ignored_item_columns": ["Q77_1_TEXT"]})
+        ),
+    )
+    assert crosswalk.roles["Q47"] == "demographic"
+    assert crosswalk.roles["Q77_1_TEXT"] == "ignored_item"
+
+
+def test_nondemographic_role_ambiguity_still_halts(
+    tmp_path: Path,
+) -> None:  # AT-M20-2 (scope guard)
+    # The collapse is demographic-scoped: a non-demographic role (ignored) resolving to
+    # two columns still halts FR-103/104 (the generic `resolve()` path is unchanged).
+    columns = [
+        ("ResponseId", "Response ID"),
+        ("Q1_1", "Resources - RS1. We have budget."),
+        ("Q1_2", "Resources - RS2. Funding is secured."),
+        ("Q2_1", "Culture - CU1. We reward experimentation."),
+        ("Q2_2", "Culture - CU2. New tools welcomed."),
+        ("Q60", "Out of model - IGN. Legacy one."),
+        ("Q61", "Out of model - IGN. Legacy two."),
+        ("StartDate", "Start Date"),
+    ]
+    path = write_synthetic_export(tmp_path / "ign_ambiguous.csv", columns)
+    cfg = dba_demographic_config(
+        [], mutate=lambda d: d["data"].update({"ignored_item_columns": ["IGN"]})
+    )
+    with pytest.raises(IntegrityHalt) as excinfo:
+        build_crosswalk(path, cfg)
+    details = excinfo.value.to_report()["details"]
+    assert "more than one" in excinfo.value.message
+    assert details["columns"] == ["Q60", "Q61"]
+    assert details["role"] == "ignored_item"
