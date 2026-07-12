@@ -278,6 +278,30 @@ def test_v4_indirect_via_absent_from_mediators_halts() -> None:  # AT-M6-MC-1
     assert details["violations"] == expected
 
 
+def test_v4_complete_mediated_default_passes() -> None:  # AT-M6-MC-2
+    # Governed default: mediators [PU, ATT]; indirect H4b via [PU, ATT].
+    # An empty difference contributes no violation entry, so it validates.
+    v4_model_references(example_config())
+
+
+def test_v4_direct_only_without_mediators_passes() -> None:  # AT-M6-MC-3
+    def direct_only(data: dict[str, Any]) -> None:
+        data["hypotheses"] = [h for h in data["hypotheses"] if h["effect"] != "indirect"]
+        data["model"].pop("mediators", None)
+
+    v4_model_references(example_config(direct_only))
+
+
+def test_v4_never_autofills_mediators() -> None:  # AT-M6-MC-4 (NFR-201)
+    config = example_config(_split_parallel_no_mediators)
+    before = config.model_dump(mode="json", by_alias=True)
+    with pytest.raises(IntegrityHalt):
+        v4_model_references(config)
+    after = config.model_dump(mode="json", by_alias=True)
+    # exact structural equality of the full dump -- never auto-filled
+    assert after == before
+
+
 def test_v6_delegates_to_the_crosswalk() -> None:  # V6 (TC-05 accounting)
     from ingest_fixture_config import base_config, base_dict
 
