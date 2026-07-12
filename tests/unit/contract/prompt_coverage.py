@@ -102,6 +102,11 @@ VALIDATORS: dict[str, list[str]] = {
     # construct reference resolves to a declared construct.
     "V4-refs-via": ["required for every `indirect` effect"],
     "V4-resolvable": ["must be one of the declared `constructs`"],
+    # V4 mediator completeness (M6 s7): every indirect via construct must be
+    # declared in model.mediators; optional only for direct-only designs.
+    "V4-mediator-completeness": [
+        "`model.mediators` must list every construct used in any indirect hypothesis's `via` chain"
+    ],
     "V5-reachable": ["must also appear as a declared `effect: direct` hypothesis"],
     "V5-unique": ["each hypothesis `id` is unique"],
     # V6: exact one-role / zero-orphan export-column accounting, not the

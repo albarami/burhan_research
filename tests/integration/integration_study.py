@@ -76,6 +76,7 @@ def integration_config() -> dict[str, Any]:
     config["meta"]["title"] = "Realistic CB-SEM integration study (TC-15)"
     config["data"]["file"] = "inputs/integration.csv"
     config["hypotheses"].extend(_ADDED_HYPOTHESES)
+    config["model"]["mediators"] = ["CUL"]  # H4 is indirect via ["CUL"]
     return config
 
 

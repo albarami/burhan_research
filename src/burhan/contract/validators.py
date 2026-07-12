@@ -98,7 +98,8 @@ def v3_higher_order(config: StudyConfig) -> None:
 
 
 def v4_model_references(config: StudyConfig) -> None:
-    """V4: model/hypothesis references resolve; via required for indirect."""
+    """V4: model/hypothesis references resolve; via required for indirect;
+    every indirect via construct is declared in model.mediators."""
     constructs = {c.code for c in config.constructs}
 
     def check(refs: Iterable[str], where: str) -> None:
@@ -125,6 +126,32 @@ def v4_model_references(config: StudyConfig) -> None:
                     )
                 )
             check(hypothesis.via, f"hypothesis {hypothesis.id} via")
+
+    # Second pass -- mediator completeness (M6 s7). Runs only after every
+    # unresolved-reference and missing-via check above has passed, so those
+    # still fail first. Coverage rule (via is a subset of mediators; extras
+    # allowed); aggregated, deterministic, declaration-ordered; never
+    # auto-fills.
+    mediators = set(config.model.mediators or [])
+    violations: list[dict[str, object]] = []
+    for hypothesis in config.hypotheses:
+        if hypothesis.effect != "indirect" or not hypothesis.via:
+            continue
+        missing = sorted(set(hypothesis.via) - mediators)
+        if missing:
+            violations.append(
+                {
+                    "hypothesis": hypothesis.id,
+                    "missing_mediators": missing,
+                }
+            )
+    if violations:
+        halt(
+            IntegrityHalt(
+                "V4: indirect hypothesis via construct not declared in model.mediators",
+                report={"violations": violations},
+            )
+        )
 
 
 def v5_hypotheses(config: StudyConfig) -> None:

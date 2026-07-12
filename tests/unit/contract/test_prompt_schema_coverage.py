@@ -113,6 +113,10 @@ REOPENINGS = [
     ("minItems:$.model.controls[].on", "every control targets at least one construct"),
     ("validator:V2-playbook-minimum", "the designed pool must meet the playbook's minimum"),
     ("validator:V4-resolvable", "must be one of the declared `constructs`"),
+    (
+        "validator:V4-mediator-completeness",
+        "`model.mediators` must list every construct used in any indirect hypothesis's `via` chain",
+    ),
     ("validator:V6-one-role", "every export column resolves to exactly one role"),
     ("validator:V6-zero-orphan", "an unaccounted column is an orphan"),
 ]

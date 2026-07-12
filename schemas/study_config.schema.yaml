@@ -234,7 +234,9 @@ properties:
 #   V3  every second_order component resolves to a first_order construct;
 #       higher_order block present iff any construct is second_order
 #   V4  every model/hypothesis construct reference resolves; via[] required
-#       and resolvable for every indirect hypothesis
+#       and resolvable for every indirect hypothesis; every indirect via
+#       construct is declared in model.mediators (completeness --
+#       model.mediators stays optional for direct-only studies)
 #   V5  hypothesis (id) unique; (from,to,effect) consistent with
 #       structural reachability
 #   V6  column accounting: after crosswalk, every export column resolves to

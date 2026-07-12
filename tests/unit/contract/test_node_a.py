@@ -364,6 +364,22 @@ def test_prompt_declares_exact_schema_top_level_keys() -> None:  # §7 (b)
         assert key in prompt, f"prompt must name allowed top-level key {key!r}"
 
 
+def test_prompt_requires_model_mediators_for_indirect_hypotheses() -> None:
+    # AT-M6-MC-5 (s7): _prompt_prohibitions() lowercases and collapses
+    # whitespace (test_node_a.py:350-353).
+    prompt = _prompt_prohibitions()
+    trigger = "whenever any hypothesis has `effect: indirect`"
+    coverage = (
+        "`model.mediators` must list every construct used in any indirect hypothesis's `via` chain"
+    )
+    order = "each such construct exactly once, in the order it is declared in `constructs`"
+    optional = "when no hypothesis has `effect: indirect`, `model.mediators` remains optional"
+    assert trigger in prompt
+    assert coverage in prompt
+    assert order in prompt
+    assert optional in prompt
+
+
 def test_prompt_binds_scale_labels_and_forbids_numeric_anchors() -> None:  # §7 (a)
     # Prohibition, not vocabulary: the prompt must FORBID a numeric-keyed anchors map and
     # a nested shared scale_range, and route anchors to scale.labels. A prompt that told
