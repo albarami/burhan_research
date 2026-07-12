@@ -205,6 +205,79 @@ def test_v5_split_parallel_indirect_paths_pass() -> None:  # V5 (correct represe
     v5_hypotheses(example_config(split_parallel))  # no raise: every chain is reachable
 
 
+def _split_parallel_no_mediators(data: dict[str, Any]) -> None:
+    # The V5-valid split-parallel scaffold (test_validators.py:181-203),
+    # reformatted one key per line (content identical), with the mediator
+    # declarations emptied: completeness is the ONLY defect.
+    data["hypotheses"] = [
+        {
+            "id": "H1",
+            "effect": "direct",
+            "from": "ENB",
+            "to": "PU",
+            "sign": "positive",
+        },
+        {
+            "id": "H2",
+            "effect": "direct",
+            "from": "ENB",
+            "to": "ATT",
+            "sign": "positive",
+        },
+        {
+            "id": "H3",
+            "effect": "direct",
+            "from": "PU",
+            "to": "INT",
+            "sign": "positive",
+        },
+        {
+            "id": "H4",
+            "effect": "direct",
+            "from": "ATT",
+            "to": "INT",
+            "sign": "positive",
+        },
+        {
+            "id": "H5a",
+            "effect": "indirect",
+            "from": "ENB",
+            "to": "INT",
+            "via": ["PU"],
+            "sign": "positive",
+        },
+        {
+            "id": "H5b",
+            "effect": "indirect",
+            "from": "ENB",
+            "to": "INT",
+            "via": ["ATT"],
+            "sign": "positive",
+        },
+    ]
+    data["model"]["mediators"] = []
+
+
+def test_v4_indirect_via_absent_from_mediators_halts() -> None:  # AT-M6-MC-1
+    config = example_config(_split_parallel_no_mediators)
+    v5_hypotheses(config)  # reachability holds; no V5 defect contaminates it
+    with pytest.raises(IntegrityHalt) as excinfo:
+        v4_model_references(config)
+    assert "V4" in excinfo.value.message
+    details = excinfo.value.to_report()["details"]
+    expected = [
+        {
+            "hypothesis": "H5a",
+            "missing_mediators": ["PU"],
+        },
+        {
+            "hypothesis": "H5b",
+            "missing_mediators": ["ATT"],
+        },
+    ]
+    assert details["violations"] == expected
+
+
 def test_v6_delegates_to_the_crosswalk() -> None:  # V6 (TC-05 accounting)
     from ingest_fixture_config import base_config, base_dict
 
