@@ -157,10 +157,12 @@ No R sources change → `lintr` no-op. Env per the standing recipe (source `~/.c
 - **D4 depends on the source correction** carrying a literal `Q45` hint; §4 step-0 read-only confirmation of the data dictionary de-risks it before code, and **SC-20** (§4a) proves the regenerated contract post-fix. The crosswalk test (M20-3) proves the *mechanism* independently of the live source.
 - **No raw data in fixtures** — every new fixture is synthetic header rows + dummy values; the value-free-report assertions (as in the existing `test_crosswalk_payload_is_canonical_and_value_free`) extend to the new cases.
 
-## 10. Definition of Done — two phases; **code merge is NOT closure**
-
-**Phase A — code PR (necessary, not sufficient):** AT-M20-1..6 green — M20-1 & M20-3 RED-first→green; M20-2, M20-4b, M20-5 guards; M20-4a valid-state; M20-6 full-suite. Whole prior suite green (incl. retained TC-05/TC-18 crosswalk cases); gates clean; `contract/crosswalk.py` stays 100%; diff limited to `crosswalk.py` + ingest tests/fixtures; FR-103/104 real-ambiguity, V6 zero-orphan, and FR-104 missing-column guards all still halt. Codex APPROVE → merge. **TC-20 is NOT closed at this point.**
-
-**Phase B — governed closure (required):** the researcher-led source correction + fresh re-extraction is performed and **SC-20 evidence (§4a) is produced** — the regenerated contract shows `D4` `column_hint "Q45"`, **no `D10`** in `data.demographics`, and a **fresh valid glance token with no hand-edit** of `study_config.yaml`. Then the `--live --confirm` DBA run is repeated and passes `prep` (N-chain) → measurement → structural → effects → `REFERENCE_COMPARISON.md`.
-
-**TC-20 closes only when BOTH Phase A (code, merged) and Phase B (SC-20 governed evidence + a clean rerun) exist.** Approving/merging the code PR alone does **not** close the contract.
+**Phase B — governed validation (closure).** Closure requires: (1) Phase A
+merged and green (AT-M20-1..6, full gates including contract/crosswalk.py at
+100 percent coverage, CI); (2) the mandatory SC-20 assertions passed on a
+fresh governed extraction (D4 -> "Q45"; no D10; corrected source provenance;
+hash-valid glance token); (3) one preserved live confirmation run in which
+prep passes, demonstrating the FR-103/104 defect cleared. Downstream
+measurement, structural, effects, and reference-comparison completion are M6
+milestone obligations of the Stage-1A remediation programme, not TC-20
+closure criteria.
